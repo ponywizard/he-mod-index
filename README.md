@@ -135,24 +135,75 @@ Credentials are checked again within write transactions, so revocation also
 rejects pending writes and token creation. Session creation checks that the
 account's password and role still match the verified login.
 
-## VPS and Caddy
+## Ubuntu VPS installation
 
-Build a portable Linux executable on your build machine (adjust GOARCH if needed):
+Use Ubuntu 22.04 or newer with systemd. Point a domain at the VPS and allow
+inbound ports 80/443 for Caddy.
+
+1. Download the release `.tar.gz` for your VPS: `linux-amd64` for x86-64 or
+   `linux-arm64` for ARM64. Releases also include `SHA256SUMS`.
+2. Extract the archive, change into its directory, and run the installer:
+
+   ```sh
+   tar -xzf he-mod-index-v0.1.0-linux-amd64.tar.gz
+   cd he-mod-index-v0.1.0-linux-amd64
+   sudo ./deploy.sh mods.example.org
+   ```
+
+   Substitute the downloaded version and your domain. You can also run
+   `sudo ./deploy.sh` and enter the domain when prompted. On a first interactive
+   installation, the installer opens the admin account wizard.
+
+3. Install Caddy using its [Ubuntu installation instructions](https://caddyserver.com/docs/install#debian-ubuntu-raspbian).
+   Add the block printed by the installer to `/etc/caddy/Caddyfile`, then run:
+
+   ```sh
+   sudo caddy validate --config /etc/caddy/Caddyfile
+   sudo systemctl reload caddy
+   ```
+
+Open `https://mods.example.org` and sign in with the admin account you created.
+The installer creates a non-login `he-mod-index` service user, copies the binary
+to `/srv/he-mod-index/he-mod-index`, installs
+[he-mod-index.service](deploy/he-mod-index.service), and enables/starts it.
+It creates `/etc/he-mod-index.env` with the public URL, loopback listener,
+local Caddy proxy addresses, and `/srv/he-mod-index/data` as the data directory.
+The binary and configuration are root-owned; only the data directory is writable
+by the service. Caddy is installed/configured separately; the installer prints
+the required block and commands.
+
+For unattended installation, pass the domain as an argument. Create the admin
+afterward with the same command used for account maintenance:
 
 ```sh
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o he-mod-index .
+sudo -u he-mod-index env DATA_DIR=/srv/he-mod-index/data /srv/he-mod-index/he-mod-index admin
 ```
 
-Install it under `/srv/he-mod-index/`, owned by an unprivileged service account.
-Set `PUBLIC_URL=https://mods.example.org`, `DATA_DIR=/srv/he-mod-index/data`, and
-`TRUSTED_PROXIES=127.0.0.1/32,::1/128` when Caddy is on the same machine. Keep the
-default loopback listener. See [deploy/Caddyfile](deploy/Caddyfile) and the
-[runit run script](deploy/runit/run). Set the actual domain in both files.
-The run script expects an account named `he-mod-index` and `chpst` from runit.
+Use `user` instead of `admin` to manage other accounts. No Go installation or
+shell password variables are needed on the VPS.
 
-If Caddy is on another machine or in a container, set the bind address and trusted
-CIDRs to match that network. Expose the app only to that proxy. Trust only the
-actual proxy addresses, since these control the registration and voting gates.
+Inspect the service and logs with:
+
+```sh
+sudo systemctl status he-mod-index
+sudo journalctl -u he-mod-index -f
+```
+
+To change settings, edit `/etc/he-mod-index.env` and restart with
+`sudo systemctl restart he-mod-index`. The supplied unit permits writes only
+under `/srv/he-mod-index/data`; changing `DATA_DIR` also requires adjusting
+`ReadWritePaths` in a systemd override. If you change the listener or Caddy's
+location, adjust the Caddy block and `TRUSTED_PROXIES` to match.
+
+### Upgrades
+
+Back up the data, download/extract the new release, and rerun `sudo ./deploy.sh`.
+The installer reuses the configured domain, preserves the environment file and
+data directory, replaces the executable/service file, and restarts the service.
+It does not reset accounts or passwords. The application migrates the database
+on startup. To change domains, update `PUBLIC_URL` in the environment file and
+the Caddy block together. Use systemd drop-ins for service customizations so
+reinstalling the supplied unit does not overwrite them.
 
 `GET /healthz` checks database connectivity. Shutdown handles SIGTERM/SIGINT.
 Back up all of `DATA_DIR` while the server is stopped, including the database's
@@ -160,12 +211,37 @@ WAL/SHM files if present and `uploads/`. For live backups use SQLite's online
 backup tooling and coordinate a snapshot of uploads; copying a live database
 file alone is insufficient.
 
+### Building release archives
+
+On a development machine with Go installed:
+
+```sh
+scripts/build-release.sh v0.1.0
+```
+
+This writes Linux amd64/arm64 archives and `SHA256SUMS` under `dist/`. Each archive
+contains the executable, `deploy.sh`, `he-mod-index.service`, README, and license.
+To build only one architecture, append it: `scripts/build-release.sh v0.1.0 amd64`.
+Upload those artifacts to a release; building them does not publish anything.
+
 ## Development
 
 ```sh
 go test ./...
 go vet ./...
 ```
+
+The Go suite stages installer files in temporary directories and checks upgrade
+preservation and input validation. To check Ubuntu service-user permissions,
+ShellCheck, the systemd unit parser, and app startup in a disposable container:
+
+```sh
+scripts/build-release.sh v0.1.0 amd64
+docker run --rm --mount type=bind,src="$PWD",dst=/src,readonly ubuntu:24.04 bash /src/tests/deploy-ubuntu.sh
+```
+
+The container installs its test dependencies and simulates `systemctl` commands;
+it does not run a booted systemd instance or change host services.
 
 Optional layout checks use Node and an installed Chromium, with isolated browser
 fixtures and no live site data:
