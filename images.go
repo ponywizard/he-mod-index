@@ -63,8 +63,9 @@ func (a *app) imageJob(r *http.Request) (func(), error) {
 		return nil, err
 	}
 	select {
-	case a.hashSlots <- struct{}{}:
-		return func() { <-a.hashSlots }, nil
+	// Slow uploads and remote fetches must not occupy password-hashing slots.
+	case a.imageSlots <- struct{}{}:
+		return func() { <-a.imageSlots }, nil
 	default:
 		return nil, problem(503, "Server busy. Try again shortly.")
 	}

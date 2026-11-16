@@ -281,3 +281,30 @@ func TestSessionIssuanceRejectsChangedAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestSlowImageUploadsDoNotBlockAuthentication(t *testing.T) {
+	a := testApp(t)
+	owner := client(a, "192.0.2.1")
+	owner.register(t, "owner")
+	m := owner.addMod(t, "mod")
+	finish := make([]func() *httptest.ResponseRecorder, 4)
+	for i := range finish {
+		finish[i] = pendingRequest(t, owner, "POST", modPath(m)+"/image", "image/png", splitImage(t))
+	}
+	// Image work remains bounded even while credentials can still be hashed.
+	status(t, owner.request("POST", modPath(m)+"/image", splitImage(t), nil), 503)
+	other := client(a, "192.0.2.2")
+	other.login(t, "owner")
+	client(a, "192.0.2.3").register(t, "newcomer")
+	status(t, owner.request("PUT", "/api/password", map[string]string{"current_password": "test-password-123", "password": "new-password-456"}, nil), 200)
+	for _, f := range finish {
+		status(t, f(), 401)
+	}
+	files, err := os.ReadDir(filepath.Join(a.cfg.DataDir, "uploads"))
+	if err != nil || len(files) != 0 {
+		t.Fatal("revoked uploads left image files", files, err)
+	}
+	// All image slots are released after the rejected writes.
+	status(t, owner.request("POST", "/api/login", credentials{"owner", "new-password-456"}, nil), 200)
+	status(t, owner.request("POST", modPath(m)+"/image", splitImage(t), nil), 200)
+}

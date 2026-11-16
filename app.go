@@ -26,6 +26,7 @@ type app struct {
 	cfg         config
 	secret      string
 	hashSlots   chan struct{}
+	imageSlots  chan struct{}
 	imageClient *http.Client
 }
 type apiError struct {
@@ -40,7 +41,7 @@ func problem(status int, message string) error { return &apiError{status, messag
 type endpoint func(http.ResponseWriter, *http.Request) error
 
 func newApp(db *sql.DB, cfg config) (*app, error) {
-	a := &app{db: db, cfg: cfg, hashSlots: make(chan struct{}, 4), imageClient: newImageClient()}
+	a := &app{db: db, cfg: cfg, hashSlots: make(chan struct{}, 4), imageSlots: make(chan struct{}, 4), imageClient: newImageClient()}
 	if _, err := db.Exec("INSERT OR IGNORE INTO settings(key,value) VALUES('secret',?)", randomToken()); err != nil {
 		return nil, err
 	}

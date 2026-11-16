@@ -87,6 +87,8 @@ choose their own admin/reviewer usernames in the wizard.
   4 MiB, 4,096 pixels per side, and 12 megapixels; GIFs use the first frame.
   URL imports use only public addresses on ports 80/443, check redirects and
   pin DNS resolution, do not use environment proxies, and time out after 12s.
+  Image work has a separate concurrency limit from password hashing, so slow
+  image requests do not consume login, registration, or password-change slots.
 - Votes are public aggregates, with one up/down/neutral vote per account per mod,
   plus one active vote per IP per mod. A neutral vote removes the vote. Shared
   networks share the IP allowance. Changing IP does not allow a second account
