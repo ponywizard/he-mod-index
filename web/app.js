@@ -1,6 +1,7 @@
 'use strict';
 const view = document.querySelector('#view');
 const message = document.querySelector('#message');
+const DEFAULT_MOD_IMAGE = '/default-mod.png';
 let session = {user: null, csrf: ''};
 let mods = [];
 let routeVersion = 0;
@@ -68,7 +69,7 @@ function indexTable() {
       const expanded = expandedMods.has(m.id);
       const version = `${m.version}${m.game_version ? ` · HE ${m.game_version}` : ''}`;
       return `<tr data-index-mod="${m.id}"${expanded ? ' class="is-expanded"' : ''}>
-        <td class="mod-title-cell"><div class="name-content"><div class="name-heading"><a class="mod-name" href="/mod/${m.id}" data-nav title="${esc(m.name)}">${esc(m.name)}</a>${badge(m)}</div>${m.thumbnail_url ? `<a href="/mod/${m.id}" data-nav class="thumbnail-link" aria-label="View ${esc(m.name)}"><img class="thumbnail" src="${esc(m.thumbnail_url)}" alt="" width="96" height="96" loading="lazy"></a>` : ''}</div></td>
+        <td class="mod-title-cell"><div class="name-content"><div class="name-heading"><a class="mod-name" href="/mod/${m.id}" data-nav title="${esc(m.name)}">${esc(m.name)}</a>${badge(m)}</div><a href="/mod/${m.id}" data-nav class="thumbnail-link" aria-label="View ${esc(m.name)}"><img class="thumbnail" src="${esc(m.thumbnail_url || DEFAULT_MOD_IMAGE)}" alt="" width="96" height="96" loading="lazy"></a></div></td>
         <td class="description-cell"><div class="post-preview" id="mod-post-${m.id}"><div class="post-header"><span class="post-author" title="${esc(m.author)}">${esc(m.author)}</span><span class="post-version" title="${esc(version)}">${esc(version)}</span></div><div class="post-subject">${esc(m.short_description)}</div><div class="post-body">${esc(m.description)}</div><button type="button" class="link-button post-more" data-expand-mod="${m.id}" aria-expanded="${expanded}" aria-controls="mod-post-${m.id}" hidden>${expanded ? 'Show less' : 'Show more'}</button></div></td>
         <td>${votes(m)}</td><td class="date">${date(m.created_at)}</td><td class="date">${date(m.updated_at)}</td>
       </tr>`;
@@ -128,7 +129,7 @@ async function editorPage(id, current) {
     ${field('Repository URL', 'repository_url', m.repository_url, {type: 'url', max: 2048})}
     ${field('Short description', 'short_description', m.short_description, {required: true, max: 240})}
     ${field('Description', 'description', m.description, {area: true, rows: 9, max: 20000})}
-    <fieldset class="image-editor" id="image-editor"><legend>Image</legend>
+    <fieldset class="image-editor" id="image-editor"><legend>Image (optional)</legend>
       <div class="field"><label for="image-file">Upload</label><input id="image-file" data-image-file type="file" accept="image/png,image/jpeg,image/gif"><small>PNG, JPEG, GIF · up to 4 MiB</small></div>
       <div class="field"><label for="image-url">Or import from URL</label><div class="image-url-row"><input id="image-url" data-image-url type="url" maxlength="2048"><button type="button" data-load-image>Load</button></div></div>
       <div data-crop-panel hidden><label for="crop-canvas">Thumbnail</label><div class="crop-layout"><canvas id="crop-canvas" width="256" height="256" tabindex="0" role="img" aria-label="Square thumbnail crop. Drag or use arrow keys to move."></canvas><div class="crop-controls"><label for="crop-zoom">Zoom</label><input id="crop-zoom" data-crop-zoom type="range" min="1" max="4" step="0.01" value="1"><label for="crop-x">Horizontal</label><input id="crop-x" data-crop-x type="range" min="0" max="100" step="0.1" value="50"><label for="crop-y">Vertical</label><input id="crop-y" data-crop-y type="range" min="0" max="100" step="0.1" value="50"><small>Drag to position.</small></div></div></div>
@@ -155,8 +156,11 @@ async function editorPage(id, current) {
 async function detailPage(id, current) {
   const m = await api(`/api/mods/${id}`); if (current !== routeVersion) return;
   const u = session.user, owner = u && (m.user_id === u.id || u.role === 'admin');
+  const hasScreenshot = m.image_url?.startsWith('/uploads/');
+  const displayImage = hasScreenshot ? m.image_url : DEFAULT_MOD_IMAGE;
+  const imageAlt = hasScreenshot ? `${m.name} screenshot` : 'Home: Equestria icon';
   document.title = `${m.name} — Home: Equestria mods`;
-  view.innerHTML = `<section class="panel"><div class="detail-header"><h2>${esc(m.name)}${badge(m)}</h2><span>${esc(m.version)}</span></div><p class="detail-meta">${esc(m.author)} · Added ${date(m.created_at)} · Updated ${date(m.updated_at)}${m.game_version ? ` · Home: Equestria ${esc(m.game_version)}` : ''}</p><p>${esc(m.short_description)}</p><div class="actions">${m.repository_url ? link(m.repository_url, 'Repository') : ''}${votes(m)}${owner ? `<a href="/mod/${m.id}/edit" data-nav>Edit</a><button class="link-button danger" data-delete-mod="${m.id}">Remove</button>` : ''}</div><h3 class="section-title">Downloads</h3><ul class="downloads">${m.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul>${m.image_url?.startsWith('/uploads/') ? `<a href="${esc(m.image_url)}" target="_blank" rel="noopener"><img class="screenshot" src="${esc(m.image_url)}" alt="${esc(m.name)} screenshot" loading="lazy"></a>` : ''}${m.description ? `<div class="description">${esc(m.description)}</div>` : ''}${m.approval !== 'none' ? `<p class="muted">${m.approval === 'current' ? 'Approved' : 'Earlier release approved'} by ${esc(m.approved_by)} · ${date(m.approved_at)}</p>` : ''}${u?.role === 'reviewer' ? `<div class="actions"><button data-approve="true" data-revision="${m.revision}" data-id="${m.id}">Approve this release</button>${m.approval !== 'none' ? `<button data-approve="false" data-revision="${m.revision}" data-id="${m.id}">Clear check</button>` : ''}</div>` : ''}</section>`;
+  view.innerHTML = `<section class="panel"><div class="detail-header"><h2>${esc(m.name)}${badge(m)}</h2><span>${esc(m.version)}</span></div><p class="detail-meta">${esc(m.author)} · Added ${date(m.created_at)} · Updated ${date(m.updated_at)}${m.game_version ? ` · Home: Equestria ${esc(m.game_version)}` : ''}</p><p>${esc(m.short_description)}</p><div class="actions">${m.repository_url ? link(m.repository_url, 'Repository') : ''}${votes(m)}${owner ? `<a href="/mod/${m.id}/edit" data-nav>Edit</a><button class="link-button danger" data-delete-mod="${m.id}">Remove</button>` : ''}</div><h3 class="section-title">Downloads</h3><ul class="downloads">${m.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul><a href="${esc(displayImage)}" target="_blank" rel="noopener"><img class="screenshot" src="${esc(displayImage)}" alt="${esc(imageAlt)}" loading="lazy"></a>${m.description ? `<div class="description">${esc(m.description)}</div>` : ''}${m.approval !== 'none' ? `<p class="muted">${m.approval === 'current' ? 'Approved' : 'Earlier release approved'} by ${esc(m.approved_by)} · ${date(m.approved_at)}</p>` : ''}${u?.role === 'reviewer' ? `<div class="actions"><button data-approve="true" data-revision="${m.revision}" data-id="${m.id}">Approve this release</button>${m.approval !== 'none' ? `<button data-approve="false" data-revision="${m.revision}" data-id="${m.id}">Clear check</button>` : ''}</div>` : ''}</section>`;
 }
 async function accountPage(current) {
   if (!needUser()) return;

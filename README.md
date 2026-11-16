@@ -73,6 +73,10 @@ Other installations can choose their own admin/reviewer usernames in the wizard.
   filename/URL download pairs, managed with Add link / Remove in the editor.
   Files live at direct external URLs. Descriptions are plain text. The optional
   game-version field records compatibility.
+- Images are optional. Mods without an image show the bundled
+  [Home: Equestria icon](https://raw.githubusercontent.com/homedevanon/home-equestria/refs/heads/main/icon.png)
+  in the index and on their detail page. The default is served locally and does
+  not become an upload owned by the mod author.
 - Screenshots can be uploaded or imported from a public image URL. Both are
   hosted locally. The editor provides a square thumbnail crop with drag, zoom,
   keyboard, and position controls. The full screenshot is kept for the detail

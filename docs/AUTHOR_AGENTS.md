@@ -82,6 +82,10 @@ for an existing multipart mod to avoid accidentally removing its other files.
 
 ## Images and thumbnails
 
+Images are optional. Leave `image_url` empty to use the index's bundled default
+icon in the UI. Preserve that empty value in later PUTs; the shared default is
+not an uploaded image and does not need to be submitted or cropped.
+
 For images, either provide an external URL in `image_url`, or POST the raw image
 bytes to `/api/mods/{id}/image`. Do not use multipart encoding. PNG, JPEG, and GIF
 are accepted, up to 4 MiB, 4,096 pixels per side, and 12 megapixels. Images are

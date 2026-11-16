@@ -47,9 +47,9 @@ const mods = [
   {id: 2, name: 'A mod with a deliberately long name that wraps beyond the first line', author: 'Anonymous', short_description: ('A longer subject with useful details ').repeat(6), description: 'A short body.', thumbnail_url: '', rating: -2},
   {id: 3, name: 'Simple mod', author: 'mod_author', short_description: 'A short subject', description: 'A short description that fits.', thumbnail_url: '/uploads/test.jpg', rating: 0},
   {id: 4, name: 'No image', author: 'Anonymous', short_description: 'No long description', description: '', thumbnail_url: '', rating: 4},
-].map(m => ({user_id: 1, version: '1.2.0', game_version: '0.3.0-maredev', created_at: timestamp, updated_at: timestamp + m.id, approval: 'none', upvotes: 0, downvotes: 0, my_vote: 0, ...m}));
+].map(m => ({user_id: 1, version: '1.2.0', game_version: '0.3.0-maredev', created_at: timestamp, updated_at: timestamp + m.id, approval: 'none', upvotes: 0, downvotes: 0, my_vote: 0, downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}], image_url: m.thumbnail_url ? '/uploads/test.jpg' : '', ...m}));
 const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGpcAAAAASUVORK5CYII=', 'base64');
-const files = new Map(['index.html', 'app.js', 'editor.js', 'style.css'].map(name => [name, fs.readFileSync(path.join(root, 'web', name))]));
+const files = new Map(['index.html', 'app.js', 'editor.js', 'style.css', 'default-mod.png'].map(name => [name, fs.readFileSync(path.join(root, 'web', name))]));
 let session;
 async function evaluate(expression) {
   const result = await call('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}, session);
@@ -76,9 +76,10 @@ async function screenshot(name) {
     const request = message.params, url = new URL(request.request.url);
     let body, type = 'application/json', status = 200;
     if (url.pathname === '/') {body = files.get('index.html'); type = 'text/html';}
-    else if (files.has(url.pathname.slice(1))) {body = files.get(url.pathname.slice(1)); type = url.pathname.endsWith('.css') ? 'text/css' : 'text/javascript';}
+    else if (files.has(url.pathname.slice(1))) {body = files.get(url.pathname.slice(1)); type = url.pathname.endsWith('.png') ? 'image/png' : url.pathname.endsWith('.css') ? 'text/css' : 'text/javascript';}
     else if (url.pathname === '/api/session') body = Buffer.from(JSON.stringify({user: {id: 1, username: 'owner', role: 'user'}, csrf: 'test'}));
     else if (url.pathname === '/api/mods') body = Buffer.from(JSON.stringify(mods));
+    else if (/^\/api\/mods\/\d+$/.test(url.pathname)) body = Buffer.from(JSON.stringify(mods.find(m => m.id === Number(url.pathname.split('/').pop()))));
     else if (/^\/uploads\//.test(url.pathname)) {body = image; type = 'image/png';}
     else {body = Buffer.alloc(0); status = url.pathname === '/favicon.ico' ? 204 : 404;}
     call('Fetch.fulfillRequest', {requestId: request.requestId, responseCode: status, responseHeaders: [{name: 'Content-Type', value: type}, {name: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"}], body: body.toString('base64')}, message.sessionId).catch(error => {if (!closing) errors.push(error.message);});
@@ -88,6 +89,9 @@ async function screenshot(name) {
   await call('Emulation.setDeviceMetricsOverride', {width: 1200, height: 850, deviceScaleFactor: 1, mobile: false}, session);
   await call('Page.navigate', {url: 'http://he-mod-index.test/'}, session);
   await until("document.querySelectorAll('[data-index-mod]').length === 4 && !document.querySelector('[data-index-mod=\"1\"] .post-more').hidden");
+  await until("document.querySelector('[data-index-mod=\"4\"] .thumbnail').naturalWidth === 256");
+  assert.equal(await evaluate("document.querySelector('[data-index-mod=\"4\"] .thumbnail').getAttribute('src')"), '/default-mod.png');
+  assert.equal(await evaluate("document.querySelector('[data-index-mod=\"3\"] .thumbnail').getAttribute('src')"), '/uploads/test.jpg');
   assert.deepEqual(await evaluate("[...document.querySelectorAll('thead button')].map(el => el.textContent.replace(/[ ↑↓]/g, ''))"), ['Name', 'Description', 'Rating', 'Added', 'Updated']);
   const heights = await evaluate("[...document.querySelectorAll('[data-index-mod]')].map(row => row.getBoundingClientRect().height)");
   assert(Math.max(...heights) - Math.min(...heights) < 1, `Description changed row height: ${heights}`);
@@ -125,8 +129,16 @@ async function screenshot(name) {
   assert(mobile.table > mobile.container, 'Table does not scroll independently on mobile');
   assert(Math.max(...mobile.heights) - Math.min(...mobile.heights) < 1, `Mobile description expanded rows: ${mobile.heights}`);
   await screenshot('index-mobile.png');
+  await evaluate("document.querySelector('a.mod-name[href=\"/mod/4\"]').click()");
+  await until("document.querySelector('.screenshot')?.naturalWidth === 256");
+  assert.equal(await evaluate("document.querySelector('.screenshot').getAttribute('src')"), '/default-mod.png');
+  await evaluate("document.querySelector('nav a[href=\"/submit\"]').click()");
+  await until("Boolean(document.querySelector('#mod-form'))");
+  assert.equal(await evaluate("document.querySelector('#image-editor legend').textContent"), 'Image (optional)');
+  await evaluate("document.querySelector('#field-name').value = 'No picture'; document.querySelector('#field-version').value = '1.0'; document.querySelector('#field-short_description').value = 'A mod without a picture'; document.querySelector('[data-filename]').value = 'mod.pck'; document.querySelector('[data-url]').value = 'https://example.org/mod.pck';");
+  assert(await evaluate("document.querySelector('#mod-form').checkValidity()"), 'The add form requires an image');
   assert.deepEqual(errors, [], `Browser errors: ${errors.join('\n')}`);
-  console.log(`Browser checks passed: column order, post styling, equal collapsed row heights (${heights[0]}px desktop), text truncation, Show more/less, sorting, full-text filtering, escaped content, and mobile scrolling.`);
+  console.log(`Browser checks passed: column order, post styling, equal collapsed row heights (${heights[0]}px desktop), text truncation, Show more/less, sorting, full-text filtering, escaped content, mobile scrolling, local fallback images, and optional image input.`);
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   closing = true;
   if (browser.exitCode === null && !browser.signalCode) {

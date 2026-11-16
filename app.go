@@ -144,7 +144,7 @@ func (a *app) routes() http.Handler {
 		if r.URL.Path == "/" || r.URL.Path == "/login" || r.URL.Path == "/register" || r.URL.Path == "/account" || r.URL.Path == "/submit" || r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/mod/") {
 			path = "web/index.html"
 		}
-		if path != "web/index.html" && path != "web/app.js" && path != "web/editor.js" && path != "web/style.css" {
+		if path != "web/index.html" && path != "web/app.js" && path != "web/editor.js" && path != "web/style.css" && path != "web/default-mod.png" {
 			http.NotFound(w, r)
 			return
 		}

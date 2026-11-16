@@ -378,6 +378,15 @@ func TestImagesAndInputValidation(t *testing.T) {
 	}
 	status(t, owner.request("GET", "/go.mod", nil, nil), 404)
 	status(t, owner.request("GET", "/uploads/no.jpg", nil, nil), 404)
+	w = owner.request("GET", "/default-mod.png", nil, nil)
+	status(t, w, 200)
+	if w.Header().Get("Content-Type") != "image/png" {
+		t.Fatal("default icon content type")
+	}
+	cfg, err := png.DecodeConfig(bytes.NewReader(w.Body.Bytes()))
+	if err != nil || cfg.Width != 256 || cfg.Height != 256 {
+		t.Fatal("bundled default icon could not be decoded", cfg, err)
+	}
 }
 
 func TestProxyTrustAndIPv6(t *testing.T) {
