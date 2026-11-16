@@ -75,8 +75,6 @@ func defaultAccountRole(name, fallback string) string {
 		return fallback
 	}
 	switch strings.ToLower(name) {
-	case "ponywizard":
-		return "admin"
 	case "devanon":
 		return "reviewer"
 	default:
@@ -204,8 +202,12 @@ func (p *accountPrompt) password(label string) (string, error) {
 func (a *app) userWizard(options userOptions, p *accountPrompt) error {
 	fmt.Fprintf(p.out, "Database: %s\n", filepath.Join(a.cfg.DataDir, "index.db"))
 	name := options.name
+	defaultName := ""
+	if options.defaultRole == "admin" {
+		defaultName = "admin"
+	}
 	for name == "" {
-		value, err := p.line("Username", "ponywizard")
+		value, err := p.line("Username", defaultName)
 		if err != nil {
 			return err
 		}

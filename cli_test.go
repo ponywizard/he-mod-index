@@ -32,7 +32,7 @@ func TestWizardCreatesAccountsAndRetriesInvalidInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Username must be", "Choose user, reviewer, or admin.", "Password must be", "Passwords do not match.", "Created user ponywizard (admin).", a.cfg.DataDir} {
+	for _, text := range []string{"Username must be", "Choose user, reviewer, or admin.", "Password must be", "Passwords do not match.", "Created user admin (admin).", a.cfg.DataDir} {
 		if !strings.Contains(output, text) {
 			t.Fatalf("missing wizard output %q: %s", text, output)
 		}
@@ -41,7 +41,7 @@ func TestWizardCreatesAccountsAndRetriesInvalidInput(t *testing.T) {
 		t.Fatal("wizard printed a password")
 	}
 	var role, hash string
-	if err = a.db.QueryRow("SELECT role,password FROM users WHERE username='ponywizard'").Scan(&role, &hash); err != nil {
+	if err = a.db.QueryRow("SELECT role,password FROM users WHERE username='admin'").Scan(&role, &hash); err != nil {
 		t.Fatal(err)
 	}
 	if role != "admin" {
@@ -62,6 +62,48 @@ func TestWizardCreatesAccountsAndRetriesInvalidInput(t *testing.T) {
 	}
 	if err = a.db.QueryRow("SELECT role FROM users WHERE username='ordinary_user'").Scan(&role); err != nil || role != "user" {
 		t.Fatal("ordinary account defaulted to privileged role", role, err)
+	}
+}
+
+func TestWizardDoesNotTreatPonywizardAsAnAdminName(t *testing.T) {
+	a := testApp(t)
+	password := "wizard-test-password"
+	output, err := runWizard(a, userOptions{}, "ponywizard\n\n", password, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "Created user ponywizard (user).") {
+		t.Fatal("general account wizard granted a privileged default", output)
+	}
+	output, err = runWizard(a, userOptions{defaultRole: "admin"}, "site_operator\n\n", password, password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "Created user site_operator (admin).") {
+		t.Fatal("operator could not choose an admin username", output)
+	}
+	other := testApp(t)
+	in, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	if err = other.runUserCommand(userOptions{name: "ponywizard"}, password, in, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	role, _, err := other.accountRole("ponywizard")
+	if err != nil || role != "user" {
+		t.Fatal("scripted account creation granted name-based admin access", role, err)
+	}
+	if err = other.provisionUser("ponywizard", password, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err = other.runUserCommand(userOptions{name: "ponywizard"}, "changed-test-password", in, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	role, _, err = other.accountRole("ponywizard")
+	if err != nil || role != "admin" {
+		t.Fatal("changing defaults demoted an existing admin", role, err)
 	}
 }
 

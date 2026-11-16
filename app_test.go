@@ -120,7 +120,7 @@ func modPath(m mod) string { return fmt.Sprintf("/api/mods/%d", m.ID) }
 func TestRegistrationAndSessions(t *testing.T) {
 	a := testApp(t)
 	c := client(a, "192.0.2.1")
-	for _, name := range []string{"devanon", "DEVANON", "ponywizard", "admin"} {
+	for _, name := range []string{"devanon", "DEVANON", "admin", "ADMIN"} {
 		status(t, c.request("POST", "/api/register", credentials{name, "test-password-123"}, nil), 409)
 	}
 	u := c.register(t, "alice")
@@ -157,6 +157,26 @@ func TestRegistrationAndSessions(t *testing.T) {
 		status(t, bad.request("POST", "/api/login", credentials{"missing", "wrong"}, nil), 401)
 	}
 	status(t, bad.request("POST", "/api/login", credentials{"missing", "wrong"}, nil), 429)
+}
+
+func TestPonywizardCanRegisterAsAnOrdinaryUser(t *testing.T) {
+	for _, name := range []string{"ponywizard", "PoNyWiZaRd"} {
+		t.Run(name, func(t *testing.T) {
+			a := testApp(t)
+			c := client(a, "192.0.2.1")
+			account := c.register(t, name)
+			if account.Role != "user" {
+				t.Fatal("username granted a privileged role", account)
+			}
+			status(t, c.request("GET", "/api/admin/users", nil, nil), 403)
+			m := c.addMod(t, "Ordinary user's mod")
+			if m.UserID != account.ID || m.Author != name {
+				t.Fatal("registration did not create a normal mod owner", m)
+			}
+			other := client(a, "192.0.2.2")
+			status(t, other.request("POST", "/api/register", credentials{"PONYWIZARD", "test-password-123"}, nil), 409)
+		})
+	}
 }
 
 func TestPersistentCooldownAndConcurrentRegistration(t *testing.T) {

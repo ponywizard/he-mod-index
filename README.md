@@ -16,8 +16,8 @@ go build -o he-mod-index .
 
 Open <http://localhost:8080>. Data is created in `./data/`. The index starts empty.
 
-`admin` opens the account wizard. Press Enter to accept `ponywizard` and the
-`admin` role, then enter and confirm a password. Password entry is hidden.
+`admin` opens the account wizard. Choose your own username, or press Enter to
+accept `admin`, then set the role and password. Password entry is hidden.
 
 ## Account management
 
@@ -34,10 +34,10 @@ password prompt to keep the password while changing the role; keeping both makes
 no changes. New passwords must be 10–128 bytes and are confirmed before saving.
 Ctrl+C or EOF cancels without saving the wizard's changes.
 
-`admin` defaults new accounts to the admin role. In `user`, `ponywizard` defaults
-to admin, `devanon` to reviewer, and other new accounts to user. To set up devanon,
-run `user`, enter `devanon`, and accept the reviewer role. Deliver their initial
-password privately; they can change it in Account.
+`admin` defaults new accounts to the admin role. The general `user` wizard asks
+for a username and defaults new accounts to user; `devanon` defaults to reviewer.
+To set up devanon, run `user`, enter `devanon`, and accept the reviewer role.
+Deliver their initial password privately; they can change it in Account.
 
 The wizard prints the database path. Run it as the service user with the same
 `DATA_DIR` as the server. Password or role changes revoke that account's sessions
@@ -55,8 +55,9 @@ With a terminal, the first command asks for the password. For scripts, supply
 passwords are never accepted as command arguments. An omitted `--role` preserves
 the existing role. Help exits successfully without opening or creating a database.
 
-`admin`, `ponywizard`, and `devanon` are reserved from public registration.
-Other installations can choose their own admin/reviewer usernames in the wizard.
+Only `admin` and `devanon` are reserved from public registration. All public
+registrations receive the ordinary user role. Each installation's operator can
+choose their own admin/reviewer usernames in the wizard.
 
 ## Behavior
 

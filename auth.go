@@ -242,7 +242,7 @@ func (a *app) register(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	switch strings.ToLower(in.Username) {
-	case "admin", "ponywizard", "devanon":
+	case "admin", "devanon":
 		return problem(409, "This username is reserved.")
 	}
 	// Check the successful-registration cooldown before doing expensive password work.
