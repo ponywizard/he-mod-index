@@ -1,0 +1,7 @@
+/data/
+/he-mod-index
+/dist/
+/.env
+*.db
+*.db-shm
+*.db-wal

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+exec 2>&1
+cd /srv/he-mod-index
+export LISTEN_ADDR=127.0.0.1:8080
+export PUBLIC_URL=https://mods.example.org
+export DATA_DIR=/srv/he-mod-index/data
+export TRUSTED_PROXIES=127.0.0.1/32,::1/128
+exec chpst -u he-mod-index:he-mod-index ./he-mod-index
