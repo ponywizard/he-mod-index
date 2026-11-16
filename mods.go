@@ -282,7 +282,7 @@ func (a *app) updateMod(w http.ResponseWriter, r *http.Request) error {
 		bump = 1
 	}
 	downloads, _ := json.Marshal(in.Downloads)
-	res, err := tx.Exec(`UPDATE mods SET name=?,version=?,game_version=?,download_url=?,downloads_json=?,repository_url=?,short_description=?,description=?,image_url=?,updated_at=?,revision=revision+? WHERE id=? AND revision=? AND updated_at=? AND image_url=?`, in.Name, in.Version, in.GameVersion, in.DownloadURL, string(downloads), in.RepositoryURL, in.ShortDescription, in.Description, media.ImageURL, time.Now().Unix(), bump, old.ID, old.Revision, old.UpdatedAt, old.ImageURL)
+	res, err := tx.Exec(`UPDATE mods SET name=?,version=?,game_version=?,download_url=?,downloads_json=?,repository_url=?,short_description=?,description=?,image_url=?,updated_at=?,revision=revision+? WHERE id=? AND user_id=? AND revision=? AND updated_at=? AND image_url=?`, in.Name, in.Version, in.GameVersion, in.DownloadURL, string(downloads), in.RepositoryURL, in.ShortDescription, in.Description, media.ImageURL, time.Now().Unix(), bump, old.ID, old.UserID, old.Revision, old.UpdatedAt, old.ImageURL)
 	if err != nil {
 		return err
 	}
@@ -314,7 +314,7 @@ func (a *app) deleteMod(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	var imageURL string
-	if err = a.db.QueryRow("DELETE FROM mods WHERE id=? RETURNING image_url", m.ID).Scan(&imageURL); err != nil {
+	if err = a.db.QueryRow("DELETE FROM mods WHERE id=? AND user_id=? RETURNING image_url", m.ID, m.UserID).Scan(&imageURL); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return problem(404, "Mod not found.")
 		}

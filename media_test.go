@@ -364,7 +364,7 @@ func TestVersionOneMigrationPreservesListingsAndBuildsThumbnails(t *testing.T) {
 	}
 	var version int
 	db.QueryRow("PRAGMA user_version").Scan(&version)
-	if version != 4 {
+	if version != schemaVersion {
 		t.Fatalf("schema version=%d", version)
 	}
 	if err = migrateDB(db); err != nil {

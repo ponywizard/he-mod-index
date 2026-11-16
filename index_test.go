@@ -26,7 +26,7 @@ func TestRemoveActivityMigrationPreservesListingsAndVotes(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version, tables int
-	if err := a.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+	if err := a.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != schemaVersion {
 		t.Fatal("migration did not advance schema", version, err)
 	}
 	if err := a.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name IN ('activity','activity_recent')").Scan(&tables); err != nil || tables != 0 {

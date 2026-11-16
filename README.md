@@ -180,9 +180,11 @@ multipart downloads, thumbnail crops, remote-image validation, migrations,
 account wizard validation/cancellation, and deletion cascades. Tests never write
 to the running site's data.
 
-Schema version 4 is recorded in `PRAGMA user_version`. A transaction migrates
+Schema version 5 is recorded in `PRAGMA user_version`. A transaction migrates
 older versions automatically, preserving listings, votes, and release checks.
 Version 4 removes the retired Hot metric's activity table and index.
+Version 5 preserves existing IDs and prevents reuse of subsequently deleted
+account, mod, and token IDs, so stale requests cannot target replacement records.
 Existing accounts keep their username display until they enable Anonymous.
 Existing single downloads become one-item arrays with a filename inferred from the URL.
 Existing local screenshots get centered thumbnails on startup; authors can

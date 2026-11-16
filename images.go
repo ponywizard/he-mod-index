@@ -215,7 +215,7 @@ func cropFromQuery(r *http.Request) (*cropRect, error) {
 	return &c, nil
 }
 func (a *app) replaceImage(w http.ResponseWriter, i identity, m mod, media storedImage) error {
-	res, err := a.db.Exec("UPDATE mods SET image_url=?,thumbnail_url=?,crop_x=?,crop_y=?,crop_size=? WHERE id=? AND image_url=?", media.ImageURL, media.ThumbnailURL, media.Crop.X, media.Crop.Y, media.Crop.Size, m.ID, m.ImageURL)
+	res, err := a.db.Exec("UPDATE mods SET image_url=?,thumbnail_url=?,crop_x=?,crop_y=?,crop_size=? WHERE id=? AND user_id=? AND image_url=?", media.ImageURL, media.ThumbnailURL, media.Crop.X, media.Crop.Y, media.Crop.Size, m.ID, m.UserID, m.ImageURL)
 	if err != nil {
 		a.removeImage(media.ImageURL, m.ID)
 		return err

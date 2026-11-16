@@ -131,7 +131,7 @@ func TestSettingsMigrationFromVersionTwo(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version int
-	if err := a.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+	if err := a.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != schemaVersion {
 		t.Fatal("settings migration did not advance schema", version, err)
 	}
 	w := owner.request("GET", "/api/session", nil, nil)
