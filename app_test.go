@@ -212,8 +212,8 @@ func TestVotesAndDeletionCascades(t *testing.T) {
 	status(t, put(voter, 1), 200)
 	status(t, put(voter, 1), 200)
 	got := readJSON[mod](t, put(voter, -1))
-	if got.Rating != -1 || got.Downvotes != 1 || got.Hot != 4 {
-		t.Fatalf("toggle duplicated vote/activity: %+v", got)
+	if got.Rating != -1 || got.Downvotes != 1 {
+		t.Fatalf("toggle duplicated vote: %+v", got)
 	}
 	second.ip = voter.ip
 	status(t, put(second, 1), 409)
@@ -234,8 +234,8 @@ func TestVotesAndDeletionCascades(t *testing.T) {
 	status(t, admin.request("DELETE", fmt.Sprintf("/api/admin/users/%d", adminUser.ID), nil, nil), 400)
 	status(t, admin.request("DELETE", fmt.Sprintf("/api/admin/users/%d", v.ID), nil, nil), 200)
 	got = readJSON[mod](t, owner.request("GET", modPath(m), nil, nil))
-	if got.Rating != 1 || got.Hot != 4 {
-		t.Fatalf("deleted user's vote/activity remain: %+v", got)
+	if got.Rating != 1 {
+		t.Fatalf("deleted user's vote remains: %+v", got)
 	}
 	status(t, owner.request("GET", modPath(own), nil, nil), 404)
 	status(t, voter.request("POST", "/api/mods", sampleMod("Gone"), nil), 401)

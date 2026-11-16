@@ -327,7 +327,7 @@ func TestVersionOneMigrationPreservesListingsAndBuildsThumbnails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(schema); err != nil {
+	if _, err = db.Exec(schemaV1); err != nil {
 		t.Fatal(err)
 	}
 	url := "/uploads/1-" + randomToken() + ".jpg"
@@ -364,7 +364,7 @@ func TestVersionOneMigrationPreservesListingsAndBuildsThumbnails(t *testing.T) {
 	}
 	var version int
 	db.QueryRow("PRAGMA user_version").Scan(&version)
-	if version != 3 {
+	if version != 4 {
 		t.Fatalf("schema version=%d", version)
 	}
 	if err = migrateDB(db); err != nil {

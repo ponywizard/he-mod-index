@@ -41,7 +41,7 @@ func migrateDB(db *sql.DB) error {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 3 {
+	if version > 4 {
 		return fmt.Errorf("database schema %d is newer than this executable supports", version)
 	}
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
@@ -53,7 +53,7 @@ func migrateDB(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 	if version == 0 {
-		if _, err = tx.Exec(schema); err != nil {
+		if _, err = tx.Exec(schemaV1); err != nil {
 			return err
 		}
 		version = 1
@@ -107,11 +107,18 @@ func migrateDB(db *sql.DB) error {
 		PRAGMA user_version=3;`); err != nil {
 			return err
 		}
+		version = 3
+	}
+	if version == 3 {
+		if _, err = tx.Exec("DROP TABLE IF EXISTS activity; PRAGMA user_version=4;"); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
 
-const schema = `
+// Keep the original schema as the migration baseline for older installations.
+const schemaV1 = `
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS users (
  id INTEGER PRIMARY KEY, username TEXT NOT NULL COLLATE NOCASE UNIQUE,

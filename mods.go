@@ -36,7 +36,6 @@ type mod struct {
 	Rating       int      `json:"rating"`
 	Upvotes      int      `json:"upvotes"`
 	Downvotes    int      `json:"downvotes"`
-	Hot          int      `json:"hot"`
 	MyVote       int      `json:"my_vote"`
 	ThumbnailURL string   `json:"thumbnail_url"`
 	ImageCrop    cropRect `json:"image_crop"`
@@ -86,7 +85,6 @@ const modSelect = `SELECT m.id,m.user_id,CASE WHEN u.anonymous=1 THEN 'Anonymous
  COALESCE((SELECT SUM(value) FROM votes WHERE mod_id=m.id),0),
  (SELECT COUNT(*) FROM votes WHERE mod_id=m.id AND value=1),
  (SELECT COUNT(*) FROM votes WHERE mod_id=m.id AND value=-1),
- (SELECT COALESCE(SUM(CASE kind WHEN 'release' THEN 3 ELSE 1 END),0) FROM activity WHERE mod_id=m.id AND created_at>?),
  COALESCE((SELECT value FROM votes WHERE mod_id=m.id AND user_id=?),0)
  FROM mods m JOIN users u ON u.id=m.user_id LEFT JOIN users reviewer ON reviewer.id=m.approved_by `
 
@@ -95,14 +93,14 @@ type scanner interface{ Scan(...any) error }
 func scanMod(s scanner) (mod, error) {
 	var m mod
 	var downloads string
-	err := s.Scan(&m.ID, &m.UserID, &m.Author, &m.Name, &m.Version, &m.GameVersion, &m.DownloadURL, &downloads, &m.RepositoryURL, &m.ShortDescription, &m.Description, &m.ImageURL, &m.ThumbnailURL, &m.ImageCrop.X, &m.ImageCrop.Y, &m.ImageCrop.Size, &m.CreatedAt, &m.UpdatedAt, &m.Revision, &m.Approval, &m.ApprovedBy, &m.ApprovedAt, &m.Rating, &m.Upvotes, &m.Downvotes, &m.Hot, &m.MyVote)
+	err := s.Scan(&m.ID, &m.UserID, &m.Author, &m.Name, &m.Version, &m.GameVersion, &m.DownloadURL, &downloads, &m.RepositoryURL, &m.ShortDescription, &m.Description, &m.ImageURL, &m.ThumbnailURL, &m.ImageCrop.X, &m.ImageCrop.Y, &m.ImageCrop.Size, &m.CreatedAt, &m.UpdatedAt, &m.Revision, &m.Approval, &m.ApprovedBy, &m.ApprovedAt, &m.Rating, &m.Upvotes, &m.Downvotes, &m.MyVote)
 	if err == nil {
 		err = json.Unmarshal([]byte(downloads), &m.Downloads)
 	}
 	return m, err
 }
 func (a *app) readMod(id, viewer int64) (mod, error) {
-	m, err := scanMod(a.db.QueryRow(modSelect+" WHERE m.id=?", time.Now().Add(-7*24*time.Hour).Unix(), viewer, id))
+	m, err := scanMod(a.db.QueryRow(modSelect+" WHERE m.id=?", viewer, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, problem(404, "Mod not found.")
 	}
@@ -117,7 +115,7 @@ func (a *app) listMods(w http.ResponseWriter, r *http.Request) error {
 	if i.User != nil {
 		uid = i.User.ID
 	}
-	rows, err := a.db.Query(modSelect+" ORDER BY m.updated_at DESC,m.id DESC", time.Now().Add(-7*24*time.Hour).Unix(), uid)
+	rows, err := a.db.Query(modSelect+" ORDER BY m.updated_at DESC,m.id DESC", uid)
 	if err != nil {
 		return err
 	}
@@ -153,11 +151,6 @@ func (a *app) getMod(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	return writeJSON(w, 200, m)
-}
-func recordActivity(tx *sql.Tx, modID, userID int64, kind string) error {
-	now := time.Now().Unix()
-	_, err := tx.Exec(`INSERT INTO activity(mod_id,actor_id,kind,created_at) VALUES(?,?,?,?) ON CONFLICT(mod_id,actor_id,kind) DO UPDATE SET created_at=CASE WHEN activity.created_at<? THEN excluded.created_at ELSE activity.created_at END`, modID, userID, kind, now, now-7*24*3600)
-	return err
 }
 func (a *app) createMod(w http.ResponseWriter, r *http.Request) error {
 	i, err := a.require(r, false)
@@ -215,9 +208,6 @@ func (a *app) createMod(w http.ResponseWriter, r *http.Request) error {
 		if _, err = tx.Exec("UPDATE mods SET image_url=?,thumbnail_url=?,crop_x=?,crop_y=?,crop_size=? WHERE id=?", media.ImageURL, media.ThumbnailURL, media.Crop.X, media.Crop.Y, media.Crop.Size, id); err != nil {
 			return err
 		}
-	}
-	if err = recordActivity(tx, id, i.User.ID, "release"); err != nil {
-		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return err
@@ -300,11 +290,6 @@ func (a *app) updateMod(w http.ResponseWriter, r *http.Request) error {
 	if n == 0 {
 		return problem(409, "Mod changed. Reload and try again.")
 	}
-	if release {
-		if err = recordActivity(tx, old.ID, i.User.ID, "release"); err != nil {
-			return err
-		}
-	}
 	if media.ImageURL != old.ImageURL {
 		if _, err = tx.Exec("UPDATE mods SET thumbnail_url=?,crop_x=?,crop_y=?,crop_size=? WHERE id=?", media.ThumbnailURL, media.Crop.X, media.Crop.Y, media.Crop.Size, old.ID); err != nil {
 			return err
@@ -375,18 +360,12 @@ func (a *app) vote(w http.ResponseWriter, r *http.Request) error {
 		if _, err = tx.Exec("DELETE FROM votes WHERE mod_id=? AND user_id=?", id, i.User.ID); err != nil {
 			return err
 		}
-		if _, err = tx.Exec("DELETE FROM activity WHERE mod_id=? AND actor_id=? AND kind='vote'", id, i.User.ID); err != nil {
-			return err
-		}
 	} else {
 		_, err = tx.Exec(`INSERT INTO votes(mod_id,user_id,ip_hash,value) VALUES(?,?,?,?) ON CONFLICT(mod_id,user_id) DO UPDATE SET ip_hash=excluded.ip_hash,value=excluded.value`, id, i.User.ID, a.keyed("ip:"+a.clientIP(r)), *in.Value)
 		if err != nil {
 			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 				return problem(409, "This network already has a vote on this mod.")
 			}
-			return err
-		}
-		if err = recordActivity(tx, id, i.User.ID, "vote"); err != nil {
 			return err
 		}
 	}

@@ -93,11 +93,13 @@ Other installations can choose their own admin/reviewer usernames in the wizard.
   and screenshot/crop changes retain checks.
   Release files should use immutable versioned URLs; replacing a remote binary
   at the same URL cannot be detected by the index.
-- Hot is the last seven days' distinct active voters plus three points for a
-  release event. Each account contributes at most one vote event and one release
-  event per mod in that window. Views and repeated toggling do not add points.
+- The index columns are Name, Description, Rating, Added, and Updated. Name shows
+  the thumbnail and release check. Description shows the author in green, version
+  information, the short description as a post subject, and the long description.
+  Collapsed rows use the name/thumbnail height; Show more expands long posts inline
+  and Show less restores the compact row. The text filter includes the full post.
 - Admins can edit/remove any mod and remove other users in the web UI. Removing
-  a user cascades through their mods, votes, activity, sessions, and tokens.
+  a user cascades through their mods, votes, sessions, and tokens.
   Removing a reviewer clears their visible checks. An admin cannot delete their
   own account through the UI.
 - Account → Upload tokens creates one-time-visible, revocable tokens with a
@@ -155,14 +157,27 @@ go test ./...
 go vet ./...
 ```
 
+Optional layout checks use Node and an installed Chromium, with isolated browser
+fixtures and no live site data:
+
+```sh
+node tests/index-layout.cjs
+```
+
+Set `CHROMIUM_BIN` if the executable is not named `chromium`. Add `--screenshots`
+to save desktop/mobile previews under the system temporary directory. The checks
+cover column order, compact row heights, post styling, expansion, sorting,
+filtering, and mobile scrolling. No frontend packages need to be installed.
+
 The integration tests use isolated temporary databases and cover authentication,
 cooldowns, proxy handling, vote rules, approval revisions, upload tokens,
 multipart downloads, thumbnail crops, remote-image validation, migrations,
 account wizard validation/cancellation, and deletion cascades. Tests never write
 to the running site's data.
 
-Schema version 3 is recorded in `PRAGMA user_version`. A transaction migrates
-versions 1 and 2 automatically, preserving listings, votes, and release checks.
+Schema version 4 is recorded in `PRAGMA user_version`. A transaction migrates
+older versions automatically, preserving listings, votes, and release checks.
+Version 4 removes the retired Hot metric's activity table and index.
 Existing accounts keep their username display until they enable Anonymous.
 Existing single downloads become one-item arrays with a filename inferred from the URL.
 Existing local screenshots get centered thumbnails on startup; authors can

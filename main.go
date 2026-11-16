@@ -114,10 +114,6 @@ func (a *app) cleanup(ctx context.Context) {
 				log.Printf("cleanup %s: %v", table, err)
 			}
 		}
-		_, err := a.db.Exec("DELETE FROM activity WHERE created_at < ?", now-int64((7*24*time.Hour).Seconds()))
-		if err != nil {
-			log.Printf("cleanup activity: %v", err)
-		}
 		select {
 		case <-ctx.Done():
 			return

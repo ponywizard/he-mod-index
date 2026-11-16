@@ -7,6 +7,9 @@ let routeVersion = 0;
 let sort = {key: 'updated_at', direction: -1};
 let filter = '';
 let disposeEditor = null;
+const expandedMods = new Set();
+let postObserver = null;
+let postLayoutFrame = 0;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const date = value => new Date(value * 1000).toLocaleDateString(undefined, {year: 'numeric', month: 'short', day: 'numeric'});
 const signed = n => n > 0 ? `+${n}` : String(n);
@@ -56,15 +59,59 @@ function indexTable() {
   const terms = filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = mods.filter(m => terms.every(t => `${m.name} ${m.author} ${m.short_description} ${m.description} ${m.version} ${m.game_version} ${(m.downloads || []).map(d => d.filename).join(' ')}`.toLowerCase().includes(t)));
   filtered.sort((a, b) => {const av = a[sort.key], bv = b[sort.key]; const result = typeof av === 'string' ? av.localeCompare(bv) : av - bv; return result * sort.direction || b.id - a.id;});
-  const cols = [['created_at', 'Date added'], ['updated_at', 'Date updated'], ['rating', 'Rating'], ['name', 'Name'], ['hot', 'Hot']];
+  const cols = [['name', 'Name'], ['short_description', 'Description'], ['rating', 'Rating'], ['created_at', 'Added'], ['updated_at', 'Updated']];
   document.querySelector('#mod-count').textContent = `${filtered.length} / ${mods.length} mods`;
-  document.querySelector('#mod-table').innerHTML = `<table class="index"><thead><tr>${cols.map(([key, label]) => `<th scope="col" aria-sort="${sort.key === key ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}"><button data-sort="${key}"${key === 'hot' ? ' title="Release activity and distinct voters over 7 days"' : ''}>${label}${sort.key === key ? (sort.direction === 1 ? ' ↑' : ' ↓') : ''}</button></th>`).join('')}</tr></thead><tbody>${filtered.length ? filtered.map(m => `<tr><td class="date">${date(m.created_at)}</td><td class="date">${date(m.updated_at)}</td><td>${votes(m)}</td><td class="mod-title-cell"><a class="mod-name" href="/mod/${m.id}" data-nav>${esc(m.name)}</a>${badge(m)}${m.thumbnail_url ? `<a href="/mod/${m.id}" data-nav class="thumbnail-link" aria-label="View ${esc(m.name)}"><img class="thumbnail" src="${esc(m.thumbnail_url)}" alt="" width="96" height="96" loading="lazy"></a>` : ''}<div class="summary">${esc(m.short_description)}</div><div class="mod-meta">${esc(m.version)} · ${esc(m.author)}${m.game_version ? ` · HE ${esc(m.game_version)}` : ''}</div></td><td title="Activity over 7 days">${m.hot}</td></tr>`).join('') : `<tr><td colspan="5" class="empty">${mods.length ? 'No matches.' : 'No mods yet. <a href="/submit" data-nav>Add mod</a>'}</td></tr>`}</tbody></table>`;
+  document.querySelector('#mod-table').innerHTML = `<table class="index">
+    <colgroup><col class="index-name"><col><col class="index-rating"><col class="index-date"><col class="index-date"></colgroup>
+    <thead><tr>${cols.map(([key, label]) => `<th scope="col" aria-sort="${sort.key === key ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}"><button data-sort="${key}">${label}${sort.key === key ? (sort.direction === 1 ? ' ↑' : ' ↓') : ''}</button></th>`).join('')}</tr></thead>
+    <tbody>${filtered.length ? filtered.map(m => {
+      const expanded = expandedMods.has(m.id);
+      const version = `${m.version}${m.game_version ? ` · HE ${m.game_version}` : ''}`;
+      return `<tr data-index-mod="${m.id}"${expanded ? ' class="is-expanded"' : ''}>
+        <td class="mod-title-cell"><div class="name-content"><div class="name-heading"><a class="mod-name" href="/mod/${m.id}" data-nav title="${esc(m.name)}">${esc(m.name)}</a>${badge(m)}</div>${m.thumbnail_url ? `<a href="/mod/${m.id}" data-nav class="thumbnail-link" aria-label="View ${esc(m.name)}"><img class="thumbnail" src="${esc(m.thumbnail_url)}" alt="" width="96" height="96" loading="lazy"></a>` : ''}</div></td>
+        <td class="description-cell"><div class="post-preview" id="mod-post-${m.id}"><div class="post-header"><span class="post-author" title="${esc(m.author)}">${esc(m.author)}</span><span class="post-version" title="${esc(version)}">${esc(version)}</span></div><div class="post-subject">${esc(m.short_description)}</div><div class="post-body">${esc(m.description)}</div><button type="button" class="link-button post-more" data-expand-mod="${m.id}" aria-expanded="${expanded}" aria-controls="mod-post-${m.id}" hidden>${expanded ? 'Show less' : 'Show more'}</button></div></td>
+        <td>${votes(m)}</td><td class="date">${date(m.created_at)}</td><td class="date">${date(m.updated_at)}</td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="5" class="empty">${mods.length ? 'No matches.' : 'No mods yet. <a href="/submit" data-nav>Add mod</a>'}</td></tr>`}</tbody>
+  </table>`;
+  queuePostLayout();
+}
+function queuePostLayout() {
+  cancelAnimationFrame(postLayoutFrame);
+  postLayoutFrame = requestAnimationFrame(fitPostPreviews);
+}
+function fitPostPreviews() {
+  postLayoutFrame = 0;
+  for (const row of document.querySelectorAll('[data-index-mod]')) {
+    const body = row.querySelector('.post-body');
+    const subject = row.querySelector('.post-subject');
+    const button = row.querySelector('.post-more');
+    const expanded = row.classList.contains('is-expanded');
+    body.style.webkitLineClamp = 'unset';
+    body.style.maxHeight = '';
+    button.textContent = expanded ? 'Show less' : 'Show more';
+    button.setAttribute('aria-expanded', String(expanded));
+    button.hidden = !expanded;
+    if (expanded) continue;
+    const overflows = body.scrollHeight > body.clientHeight + 1 || subject.scrollHeight > subject.clientHeight + 1;
+    if (overflows) {
+      button.hidden = false;
+      const lineHeight = parseFloat(getComputedStyle(body).lineHeight);
+      const lines = Math.max(1, Math.floor(body.clientHeight / lineHeight));
+      body.style.webkitLineClamp = String(lines);
+      body.style.maxHeight = `${lines * lineHeight}px`;
+    }
+  }
 }
 async function indexPage(current) {
   const loaded = await api('/api/mods'); if (current !== routeVersion) return; mods = loaded;
   view.innerHTML = `<div class="toolbar"><label for="filter">Filter</label><input id="filter" type="search" placeholder="Name, author, description…" value="${esc(filter)}" autocomplete="off"><span class="count" id="mod-count" role="status"></span></div><div class="scroll" id="mod-table"></div>`;
   document.querySelector('#filter').addEventListener('input', event => {filter = event.target.value; indexTable();});
   indexTable();
+  if (typeof ResizeObserver !== 'undefined') {
+    postObserver = new ResizeObserver(queuePostLayout);
+    postObserver.observe(document.querySelector('#mod-table'));
+  }
 }
 function authPage(register) {
   view.innerHTML = `<section class="panel narrow"><h2>${register ? 'Register' : 'Sign in'}</h2><form id="auth-form">${field('Username', 'username', '', {required: true, max: 32, autocomplete: 'username'})}${field('Password', 'password', '', {required: true, type: 'password', max: 128, min: register ? 10 : undefined, autocomplete: register ? 'new-password' : 'current-password', hint: register ? 'At least 10 characters.' : ''})}<button type="submit">${register ? 'Register' : 'Sign in'}</button></form></section><a href="/${register ? 'login' : 'register'}${location.search}" data-nav>${register ? 'Sign in' : 'Register'}</a>`;
@@ -138,6 +185,8 @@ async function adminPage(current) {
   view.innerHTML = `<h2>Admin</h2><h3 class="section-title">Users</h3><div class="scroll"><table><thead><tr><th>Username</th><th>Role</th><th>Registered</th><th>Mods</th><th>Votes</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td class="date">${date(u.created_at)}</td><td>${u.mods}</td><td>${u.votes}</td><td>${u.id !== session.user.id ? `<button class="link-button danger" data-delete-user="${u.id}" data-name="${esc(u.username)}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div><h3 class="section-title">Mods</h3><div class="scroll"><table><thead><tr><th>Name</th><th>Author</th><th></th></tr></thead><tbody>${allMods.map(m => `<tr><td><a href="/mod/${m.id}" data-nav>${esc(m.name)}</a></td><td>${esc(usernames.get(m.user_id) || m.author)}</td><td><button class="link-button danger" data-delete-mod="${m.id}">Remove</button></td></tr>`).join('') || '<tr><td colspan="3">No mods.</td></tr>'}</tbody></table></div>`;
 }
 async function render() {
+  if (postObserver) {postObserver.disconnect(); postObserver = null;}
+  cancelAnimationFrame(postLayoutFrame);
   if (disposeEditor) {disposeEditor(); disposeEditor = null;}
   const current = ++routeVersion; notice(''); document.title = 'Mods — Home: Equestria';
   view.innerHTML = '<p>Loading…</p>';
@@ -160,6 +209,12 @@ document.addEventListener('click', async event => {
   try {
     if (button.id === 'logout') {await api('/api/logout', {method: 'POST'}); await refreshSession(); navigate('/');}
     if (button.dataset.sort) {sort = {key: button.dataset.sort, direction: sort.key === button.dataset.sort ? -sort.direction : (button.dataset.sort === 'name' ? 1 : -1)}; indexTable();}
+    if (button.dataset.expandMod) {
+      const id = Number(button.dataset.expandMod);
+      if (expandedMods.has(id)) expandedMods.delete(id); else expandedMods.add(id);
+      button.closest('[data-index-mod]').classList.toggle('is-expanded', expandedMods.has(id));
+      fitPostPreviews();
+    }
     if (button.dataset.vote) {
       if (!session.user) {navigate(`/login?next=${encodeURIComponent(location.pathname)}`); return;}
       button.disabled = true;
@@ -175,4 +230,5 @@ document.addEventListener('click', async event => {
   } catch (error) {notice(error.message);} finally {button.disabled = false;}
 });
 window.addEventListener('popstate', render);
+window.addEventListener('resize', () => {if (location.pathname === '/') queuePostLayout();});
 refreshSession().then(render).catch(error => {view.innerHTML = ''; notice(error.message);});
