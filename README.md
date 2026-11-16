@@ -10,39 +10,60 @@ Go 1.25 or newer:
 
 ```sh
 go build -o he-mod-index .
+./he-mod-index admin
 ./he-mod-index
 ```
 
 Open <http://localhost:8080>. Data is created in `./data/`. The index starts empty.
 
-Create the operator account and reserved reviewer account locally. Passwords are
-read from the environment, never command arguments:
+`admin` opens the account wizard. Press Enter to accept `ponywizard` and the
+`admin` role, then enter and confirm a password. Password entry is hidden.
+
+## Account management
+
+Create accounts, reset passwords, or change roles interactively:
 
 ```sh
-read -r -s -p 'Admin password: ' ACCOUNT_PASSWORD; echo
-export ACCOUNT_PASSWORD
-./he-mod-index user --name ponywizard --role admin
-unset ACCOUNT_PASSWORD
-
-read -r -s -p 'Devanon password: ' ACCOUNT_PASSWORD; echo
-export ACCOUNT_PASSWORD
-./he-mod-index user --name devanon --role reviewer
-unset ACCOUNT_PASSWORD
+./he-mod-index admin
+./he-mod-index user
 ```
 
-Run these Bash commands as the service user with the same `DATA_DIR` as the
-server. Each password must be 10–128 bytes. Running the command for an existing
-account resets its password and role and revokes all its sessions and tokens.
-Deliver devanon's initial password privately; they can change it in Account.
+Both commands prompt for a username, role, and password. Existing accounts keep
+their current role unless you choose a different one. Press Enter at the new
+password prompt to keep the password while changing the role; keeping both makes
+no changes. New passwords must be 10–128 bytes and are confirmed before saving.
+Ctrl+C or EOF cancels without saving the wizard's changes.
+
+`admin` defaults new accounts to the admin role. In `user`, `ponywizard` defaults
+to admin, `devanon` to reviewer, and other new accounts to user. To set up devanon,
+run `user`, enter `devanon`, and accept the reviewer role. Deliver their initial
+password privately; they can change it in Account.
+
+The wizard prints the database path. Run it as the service user with the same
+`DATA_DIR` as the server. Password or role changes revoke that account's sessions
+and upload tokens. Preferences and mod ownership are preserved.
+
+Flags remain available when useful:
+
+```sh
+./he-mod-index user --name devanon --role reviewer
+./he-mod-index user --help
+```
+
+With a terminal, the first command asks for the password. For scripts, supply
+`--name` and set `ACCOUNT_PASSWORD` through your secret manager/environment;
+passwords are never accepted as command arguments. An omitted `--role` preserves
+the existing role. Help exits successfully without opening or creating a database.
+
 `admin`, `ponywizard`, and `devanon` are reserved from public registration.
-Other installations can provision their own admin/reviewer names with this command.
+Other installations can choose their own admin/reviewer usernames in the wizard.
 
 ## Behavior
 
 - Registration requires only a username and password. The first successful
   registration starts a persistent IP cooldown (one hour by default). Login and
   registration attempts are also rate limited. There is no email recovery;
-  the operator can reset an account with the local command above.
+  the operator can reset an account with the local wizard above.
 - Account → Settings → Anonymous display name shows `Anonymous` as the author
   on all of that account's mods and reviews, including existing ones. Turning
   it off restores the username. Sign-in still uses the account username; admins
@@ -92,7 +113,7 @@ Other installations can provision their own admin/reviewer names with this comma
 | `DATA_DIR` | `data` | SQLite database and uploaded screenshots |
 | `REGISTRATION_COOLDOWN` | `1h` | Successful registrations per IP; Go duration, at least 1s |
 | `TRUSTED_PROXIES` | empty | Comma-separated proxy CIDRs trusted to supply `X-Forwarded-For` |
-| `ACCOUNT_PASSWORD` | empty | Password for the `user` command only |
+| `ACCOUNT_PASSWORD` | empty | Password for scripted account commands; terminal users are prompted |
 
 Set environment variables in your service supervisor. The app does not load
 `.env` files automatically. IPs are stored only as keyed hashes; IPv6 addresses
@@ -136,8 +157,9 @@ go vet ./...
 
 The integration tests use isolated temporary databases and cover authentication,
 cooldowns, proxy handling, vote rules, approval revisions, upload tokens,
-multipart downloads, thumbnail crops, remote-image validation, migrations, and
-deletion cascades. Tests never write to the running site's data.
+multipart downloads, thumbnail crops, remote-image validation, migrations,
+account wizard validation/cancellation, and deletion cascades. Tests never write
+to the running site's data.
 
 Schema version 3 is recorded in `PRAGMA user_version`. A transaction migrates
 versions 1 and 2 automatically, preserving listings, votes, and release checks.

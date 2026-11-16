@@ -64,6 +64,13 @@ func main() {
 }
 
 func run() error {
+	command, err := parseCLI(os.Args[1:], os.Stdout)
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -77,22 +84,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if len(os.Args) > 1 {
-		if os.Args[1] != "user" {
-			return errors.New("usage: he-mod-index [user --name NAME --role user|reviewer|admin]; set ACCOUNT_PASSWORD via environment")
-		}
-		fs := flag.NewFlagSet("user", flag.ContinueOnError)
-		name := fs.String("name", "", "username")
-		role := fs.String("role", "user", "user, reviewer, or admin")
-		if err := fs.Parse(os.Args[2:]); err != nil {
-			return err
-		}
-		password := os.Getenv("ACCOUNT_PASSWORD")
-		if err := a.provisionUser(*name, password, *role); err != nil {
-			return err
-		}
-		fmt.Printf("Updated user %s (%s). Existing sessions and tokens revoked.\n", *name, *role)
-		return nil
+	if command != nil {
+		return a.runUserCommand(*command, os.Getenv("ACCOUNT_PASSWORD"), os.Stdin, os.Stdout)
 	}
 	srv := &http.Server{Addr: cfg.Addr, Handler: a.routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

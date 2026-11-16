@@ -27,9 +27,15 @@ type identity struct {
 
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]{2,31}$`)
 
-func validateAccount(name, password string) error {
+func validateUsername(name string) error {
 	if !usernamePattern.MatchString(name) {
 		return problem(400, "Username must be 3–32 letters, numbers, underscores, or hyphens.")
+	}
+	return nil
+}
+func validateAccount(name, password string) error {
+	if err := validateUsername(name); err != nil {
+		return err
 	}
 	if len(password) < 10 || len(password) > 128 {
 		return problem(400, "Password must be 10–128 bytes.")
@@ -90,6 +96,37 @@ func (a *app) provisionUser(name, password, role string) error {
 		}
 	}
 	return tx.Commit()
+}
+
+func (a *app) changeUserRole(name, role string) (bool, error) {
+	if role != "user" && role != "reviewer" && role != "admin" {
+		return false, errors.New("role must be user, reviewer, or admin")
+	}
+	tx, err := a.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var id int64
+	var current string
+	if err = tx.QueryRow("SELECT id,role FROM users WHERE username=?", name).Scan(&id, &current); errors.Is(err, sql.ErrNoRows) {
+		return false, errors.New("user no longer exists")
+	}
+	if err != nil {
+		return false, err
+	}
+	if current == role {
+		return false, nil
+	}
+	if _, err = tx.Exec("UPDATE users SET role=? WHERE id=?", role, id); err != nil {
+		return false, err
+	}
+	for _, table := range []string{"sessions", "tokens"} {
+		if _, err = tx.Exec("DELETE FROM "+table+" WHERE user_id=?", id); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit()
 }
 func (a *app) authenticate(r *http.Request) (identity, error) {
 	var i identity
