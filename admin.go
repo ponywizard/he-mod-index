@@ -50,7 +50,7 @@ func (a *app) deleteUser(w http.ResponseWriter, r *http.Request) error {
 	if id == i.User.ID {
 		return problem(400, "You cannot remove your own admin account.")
 	}
-	tx, err := a.db.Begin()
+	tx, err := a.beginWrite(i)
 	if err != nil {
 		return err
 	}

@@ -215,16 +215,29 @@ func cropFromQuery(r *http.Request) (*cropRect, error) {
 	return &c, nil
 }
 func (a *app) replaceImage(w http.ResponseWriter, i identity, m mod, media storedImage) error {
-	res, err := a.db.Exec("UPDATE mods SET image_url=?,thumbnail_url=?,crop_x=?,crop_y=?,crop_size=? WHERE id=? AND user_id=? AND image_url=?", media.ImageURL, media.ThumbnailURL, media.Crop.X, media.Crop.Y, media.Crop.Size, m.ID, m.UserID, m.ImageURL)
+	saved := false
+	defer func() {
+		if !saved {
+			a.removeImage(media.ImageURL, m.ID)
+		}
+	}()
+	tx, err := a.beginWrite(i)
 	if err != nil {
-		a.removeImage(media.ImageURL, m.ID)
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec("UPDATE mods SET image_url=?,thumbnail_url=?,crop_x=?,crop_y=?,crop_size=? WHERE id=? AND user_id=? AND image_url=?", media.ImageURL, media.ThumbnailURL, media.Crop.X, media.Crop.Y, media.Crop.Size, m.ID, m.UserID, m.ImageURL)
+	if err != nil {
 		return err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		a.removeImage(media.ImageURL, m.ID)
 		return problem(409, "Mod changed. Reload and try again.")
 	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	saved = true
 	a.removeImage(m.ImageURL, m.ID)
 	result, err := a.readMod(m.ID, i.User.ID)
 	if err != nil {

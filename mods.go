@@ -179,7 +179,7 @@ func (a *app) createMod(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 	}
-	tx, err := a.db.Begin()
+	tx, err := a.beginWrite(i)
 	if err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func (a *app) updateMod(w http.ResponseWriter, r *http.Request) error {
 			}
 		}()
 	}
-	tx, err := a.db.Begin()
+	tx, err := a.beginWrite(i)
 	if err != nil {
 		return err
 	}
@@ -309,15 +309,23 @@ func (a *app) updateMod(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, 200, m)
 }
 func (a *app) deleteMod(w http.ResponseWriter, r *http.Request) error {
-	_, m, err := a.ownedMod(r)
+	i, m, err := a.ownedMod(r)
 	if err != nil {
 		return err
 	}
+	tx, err := a.beginWrite(i)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var imageURL string
-	if err = a.db.QueryRow("DELETE FROM mods WHERE id=? AND user_id=? RETURNING image_url", m.ID, m.UserID).Scan(&imageURL); err != nil {
+	if err = tx.QueryRow("DELETE FROM mods WHERE id=? AND user_id=? RETURNING image_url", m.ID, m.UserID).Scan(&imageURL); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return problem(404, "Mod not found.")
 		}
+		return err
+	}
+	if err = tx.Commit(); err != nil {
 		return err
 	}
 	a.removeImage(imageURL, m.ID)
@@ -344,7 +352,7 @@ func (a *app) vote(w http.ResponseWriter, r *http.Request) error {
 	if in.Value == nil || *in.Value < -1 || *in.Value > 1 {
 		return problem(400, "Vote must be -1, 0, or 1.")
 	}
-	tx, err := a.db.Begin()
+	tx, err := a.beginWrite(i)
 	if err != nil {
 		return err
 	}
@@ -400,11 +408,16 @@ func (a *app) approve(w http.ResponseWriter, r *http.Request) error {
 	if in.Approved == nil {
 		return problem(400, "approved is required.")
 	}
+	tx, err := a.beginWrite(i)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var res sql.Result
 	if *in.Approved {
-		res, err = a.db.Exec("UPDATE mods SET approved_revision=revision,approved_by=?,approved_at=? WHERE id=? AND revision=?", i.User.ID, time.Now().Unix(), id, in.Revision)
+		res, err = tx.Exec("UPDATE mods SET approved_revision=revision,approved_by=?,approved_at=? WHERE id=? AND revision=?", i.User.ID, time.Now().Unix(), id, in.Revision)
 	} else {
-		res, err = a.db.Exec("UPDATE mods SET approved_revision=NULL,approved_by=NULL,approved_at=NULL WHERE id=? AND revision=?", id, in.Revision)
+		res, err = tx.Exec("UPDATE mods SET approved_revision=NULL,approved_by=NULL,approved_at=NULL WHERE id=? AND revision=?", id, in.Revision)
 	}
 	if err != nil {
 		return err
@@ -412,6 +425,9 @@ func (a *app) approve(w http.ResponseWriter, r *http.Request) error {
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return problem(409, "Mod changed or was removed. Reload before reviewing.")
+	}
+	if err = tx.Commit(); err != nil {
+		return err
 	}
 	m, err := a.readMod(id, i.User.ID)
 	if err != nil {

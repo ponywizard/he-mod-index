@@ -129,6 +129,9 @@ database. Keep it stable by preserving the database. Sessions and API tokens are
 stored as hashes; passwords use salted PBKDF2-HMAC-SHA256 with 600,000 iterations.
 Browser mutations require CSRF tokens and reject mismatched origins. Forwarded
 headers from untrusted peers are ignored.
+Credentials are checked again within write transactions, so revocation also
+rejects pending writes and token creation. Session creation checks that the
+account's password and role still match the verified login.
 
 ## VPS and Caddy
 

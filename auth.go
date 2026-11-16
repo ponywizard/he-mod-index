@@ -20,9 +20,10 @@ type user struct {
 	Anonymous bool   `json:"anonymous"`
 }
 type identity struct {
-	User   *user
-	Bearer bool
-	CSRF   string
+	User           *user
+	Bearer         bool
+	CSRF           string
+	credentialHash string
 }
 
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_-]{2,31}$`)
@@ -160,6 +161,7 @@ func (a *app) authenticate(r *http.Request) (identity, error) {
 		return i, err
 	}
 	i.User = u
+	i.credentialHash = hash
 	return i, nil
 }
 func (a *app) require(r *http.Request, browserOnly bool) (identity, error) {
@@ -178,11 +180,43 @@ func (a *app) require(r *http.Request, browserOnly bool) (identity, error) {
 	}
 	return i, nil
 }
-func (a *app) setSession(w http.ResponseWriter, u *user) error {
+
+// Recheck the credential in the same transaction as its write. A request may
+// have waited on its body, remote images, or hashing since require() succeeded.
+func (a *app) beginWrite(i identity) (*sql.Tx, error) {
+	tx, err := a.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	table := "sessions"
+	if i.Bearer {
+		table = "tokens"
+	}
+	var valid bool
+	err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM "+table+" c JOIN users u ON u.id=c.user_id WHERE c.hash=? AND c.user_id=? AND c.expires_at>? AND u.role=?)", i.credentialHash, i.User.ID, time.Now().Unix(), i.User.Role).Scan(&valid)
+	if err == nil && !valid {
+		err = problem(401, "Session or token is no longer valid.")
+	}
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	return tx, nil
+}
+
+func (a *app) setSession(w http.ResponseWriter, u *user, passwordHash string) error {
 	raw := randomToken()
 	expires := time.Now().Add(30 * 24 * time.Hour)
-	if _, err := a.db.Exec("INSERT INTO sessions(hash,user_id,expires_at) VALUES(?,?,?)", digest(raw), u.ID, expires.Unix()); err != nil {
+	// Password verification happens outside the DB transaction. Do not issue a
+	// session if a reset or role change invalidated that verification meanwhile.
+	res, err := a.db.Exec("INSERT INTO sessions(hash,user_id,expires_at) SELECT ?,id,? FROM users WHERE id=? AND password=? AND role=?", digest(raw), expires.Unix(), u.ID, passwordHash, u.Role)
+	if err != nil {
 		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return problem(401, "Account changed. Sign in again.")
 	}
 	http.SetCookie(w, &http.Cookie{Name: "he_session", Value: raw, Path: "/", HttpOnly: true, Secure: strings.HasPrefix(a.cfg.PublicURL, "https:"), SameSite: http.SameSiteStrictMode, Expires: expires, MaxAge: 30 * 24 * 3600})
 	return nil
@@ -212,13 +246,21 @@ func (a *app) updateSettings(w http.ResponseWriter, r *http.Request) error {
 	if in.Anonymous == nil {
 		return problem(400, "anonymous must be true or false.")
 	}
-	res, err := a.db.Exec("UPDATE users SET anonymous=? WHERE id=?", *in.Anonymous, i.User.ID)
+	tx, err := a.beginWrite(i)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec("UPDATE users SET anonymous=? WHERE id=?", *in.Anonymous, i.User.ID)
 	if err != nil {
 		return err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return problem(401, "Sign in required.")
+	}
+	if err = tx.Commit(); err != nil {
+		return err
 	}
 	i.User.Anonymous = *in.Anonymous
 	return writeJSON(w, 200, i.User)
@@ -286,7 +328,7 @@ func (a *app) register(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	u := &user{ID: id, Username: in.Username, Role: "user"}
-	if err = a.setSession(w, u); err != nil {
+	if err = a.setSession(w, u, hash); err != nil {
 		return err
 	}
 	return writeJSON(w, 201, u)
@@ -319,7 +361,7 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return problem(401, "Invalid username or password.")
 	}
-	if err = a.setSession(w, u); err != nil {
+	if err = a.setSession(w, u, hash); err != nil {
 		return err
 	}
 	return writeJSON(w, 200, u)
@@ -371,13 +413,19 @@ func (a *app) changePassword(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	tx, err := a.db.Begin()
+	tx, err := a.beginWrite(i)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec("UPDATE users SET password=? WHERE id=?", hash, i.User.ID); err != nil {
+	res, err := tx.Exec("UPDATE users SET password=? WHERE id=? AND password=?", hash, i.User.ID, old)
+	if err != nil {
 		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return problem(409, "Password changed. Sign in again.")
 	}
 	for _, table := range []string{"sessions", "tokens"} {
 		if _, err = tx.Exec("DELETE FROM "+table+" WHERE user_id=?", i.User.ID); err != nil {
@@ -431,8 +479,13 @@ func (a *app) createToken(w http.ResponseWriter, r *http.Request) error {
 	if len(in.Name) < 1 || len(in.Name) > 80 {
 		return problem(400, "Token name must be 1–80 bytes.")
 	}
+	tx, err := a.beginWrite(i)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var count int
-	if err = a.db.QueryRow("SELECT COUNT(*) FROM tokens WHERE user_id=? AND expires_at>?", i.User.ID, time.Now().Unix()).Scan(&count); err != nil {
+	if err = tx.QueryRow("SELECT COUNT(*) FROM tokens WHERE user_id=? AND expires_at>?", i.User.ID, time.Now().Unix()).Scan(&count); err != nil {
 		return err
 	}
 	if count >= 20 {
@@ -440,11 +493,14 @@ func (a *app) createToken(w http.ResponseWriter, r *http.Request) error {
 	}
 	raw := "he_" + randomToken()
 	expires := time.Now().Add(365 * 24 * time.Hour).Unix()
-	res, err := a.db.Exec("INSERT INTO tokens(user_id,name,hash,created_at,expires_at) VALUES(?,?,?,?,?)", i.User.ID, in.Name, digest(raw), time.Now().Unix(), expires)
+	res, err := tx.Exec("INSERT INTO tokens(user_id,name,hash,created_at,expires_at) VALUES(?,?,?,?,?)", i.User.ID, in.Name, digest(raw), time.Now().Unix(), expires)
 	if err != nil {
 		return err
 	}
 	id, _ := res.LastInsertId()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
 	return writeJSON(w, 201, map[string]any{"id": id, "token": raw, "expires_at": expires})
 }
 func (a *app) deleteToken(w http.ResponseWriter, r *http.Request) error {
@@ -456,13 +512,21 @@ func (a *app) deleteToken(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	res, err := a.db.Exec("DELETE FROM tokens WHERE id=? AND user_id=?", id, i.User.ID)
+	tx, err := a.beginWrite(i)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec("DELETE FROM tokens WHERE id=? AND user_id=?", id, i.User.ID)
 	if err != nil {
 		return err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return problem(404, "Token not found.")
+	}
+	if err = tx.Commit(); err != nil {
+		return err
 	}
 	return writeJSON(w, 200, map[string]bool{"ok": true})
 }

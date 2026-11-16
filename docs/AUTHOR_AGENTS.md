@@ -121,7 +121,8 @@ deleting a listing unless their current request explicitly authorizes deletion.
 ## Errors
 
 Errors are JSON objects with an `error` string. Handle 401 by requesting a valid
-token, 403 as an ownership/scope restriction, 409 by reading the latest listing
+token (including one revoked or expired while a request was pending),
+403 as an ownership/scope restriction, 409 by reading the latest listing
 before retrying, and 429 by respecting `Retry-After` (seconds). Do not retry other
 4xx responses without correcting the input. Do not repeatedly create a listing
 after a network timeout: check the author's listings for the returned or intended

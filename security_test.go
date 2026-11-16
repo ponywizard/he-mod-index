@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -34,8 +39,13 @@ func pendingRequest(t *testing.T, c *testClient, method, path, content string, d
 	r.Body = body
 	r.RemoteAddr = c.ip + ":12345"
 	r.Header.Set("Content-Type", content)
-	r.AddCookie(c.cookie)
-	r.Header.Set("X-CSRF-Token", c.csrf)
+	if c.cookie != nil {
+		r.AddCookie(c.cookie)
+		r.Header.Set("X-CSRF-Token", c.csrf)
+	}
+	if c.token != "" {
+		r.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	w := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() { c.a.routes().ServeHTTP(w, r); close(done) }()
@@ -112,5 +122,162 @@ func TestStaleApprovalCannotApproveReplacementMod(t *testing.T) {
 	approved := readJSON[mod](t, owner.request("GET", modPath(replacement), nil, nil))
 	if approved.Approval != "none" || approved.DownloadURL != in.DownloadURL {
 		t.Fatal("stale review approved replacement release")
+	}
+}
+
+func TestPendingTokenCreationRejectsRevocation(t *testing.T) {
+	for _, action := range []string{"password", "logout", "role", "operator reset", "expiry", "deletion"} {
+		t.Run(action, func(t *testing.T) {
+			a := testApp(t)
+			admin := client(a, "192.0.2.1")
+			admin.provision(t, "operator", "admin")
+			owner := client(a, "192.0.2.2")
+			u := owner.register(t, "owner")
+			finish := pendingRequest(t, owner, "POST", "/api/tokens", "application/json", []byte(`{"name":"pending token"}`))
+			switch action {
+			case "password":
+				status(t, owner.request("PUT", "/api/password", map[string]string{"current_password": "test-password-123", "password": "new-password-456"}, nil), 200)
+			case "logout":
+				status(t, owner.request("POST", "/api/logout", nil, nil), 200)
+			case "role":
+				if _, err := a.changeUserRole(u.Username, "reviewer"); err != nil {
+					t.Fatal(err)
+				}
+			case "operator reset":
+				if err := a.provisionUser(u.Username, "operator-password-456", u.Role); err != nil {
+					t.Fatal(err)
+				}
+			case "expiry":
+				if _, err := a.db.Exec("UPDATE sessions SET expires_at=0 WHERE user_id=?", u.ID); err != nil {
+					t.Fatal(err)
+				}
+			case "deletion":
+				status(t, admin.request("DELETE", fmt.Sprintf("/api/admin/users/%d", u.ID), nil, nil), 200)
+				next := client(a, "192.0.2.3").register(t, "replacement")
+				if next.ID <= u.ID {
+					t.Fatal("deleted account ID reused")
+				}
+			}
+			status(t, finish(), 401)
+			var count int
+			if err := a.db.QueryRow("SELECT COUNT(*) FROM tokens").Scan(&count); err != nil || count != 0 {
+				t.Fatal("revoked session created a token", count, err)
+			}
+		})
+	}
+}
+
+func TestPendingWritesRejectRevokedCredentials(t *testing.T) {
+	for _, operation := range []string{"create", "update", "upload", "crop", "settings", "vote", "approval"} {
+		t.Run(operation, func(t *testing.T) {
+			a := testApp(t)
+			owner := client(a, "192.0.2.1")
+			u := owner.provision(t, "owner", "reviewer")
+			m := owner.addMod(t, "Original")
+			w := owner.request("POST", modPath(m)+"/image", splitImage(t), nil)
+			status(t, w, 200)
+			m = readJSON[mod](t, w)
+			writer := owner
+			var tokenID int64
+			if operation == "create" || operation == "update" || operation == "upload" || operation == "crop" {
+				w = owner.request("POST", "/api/tokens", map[string]string{"name": "upload"}, nil)
+				status(t, w, 201)
+				token := readJSON[struct {
+					ID    int64
+					Token string
+				}](t, w)
+				tokenID = token.ID
+				writer = client(a, "192.0.2.2")
+				writer.token = token.Token
+			}
+			method, path, content := "POST", "/api/mods", "application/json"
+			var input any = sampleMod("Changed")
+			switch operation {
+			case "update":
+				method, path = "PUT", modPath(m)
+				in := m.modInput
+				in.Version = "2.0"
+				input = in
+			case "upload":
+				path, content = modPath(m)+"/image", "image/png"
+			case "crop":
+				path, input = modPath(m)+"/image/crop", cropRect{0, 0, 100}
+			case "settings":
+				method, path, input = "PUT", "/api/settings", map[string]bool{"anonymous": true}
+			case "vote":
+				method, path, input = "PUT", modPath(m)+"/vote", map[string]int{"value": 1}
+			case "approval":
+				method, path, input = "PUT", modPath(m)+"/approval", map[string]any{"approved": true, "revision": m.Revision}
+			}
+			body, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if operation == "upload" {
+				body = splitImage(t)
+			}
+			finish := pendingRequest(t, writer, method, path, content, body)
+			if tokenID != 0 {
+				status(t, owner.request("DELETE", fmt.Sprintf("/api/tokens/%d", tokenID), nil, nil), 200)
+			} else if operation == "approval" {
+				if _, err := a.changeUserRole(u.Username, "user"); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				status(t, owner.request("POST", "/api/logout", nil, nil), 200)
+			}
+			status(t, finish(), 401)
+			current, err := a.readMod(m.ID, u.ID)
+			if err != nil || !reflect.DeepEqual(m, current) {
+				t.Fatal("revoked request changed mod", current, err)
+			}
+			var count int
+			if err = a.db.QueryRow("SELECT COUNT(*) FROM mods").Scan(&count); err != nil || count != 1 {
+				t.Fatal("revoked request created mod", count, err)
+			}
+			files, err := os.ReadDir(filepath.Join(a.cfg.DataDir, "uploads"))
+			if err != nil || len(files) != 2 {
+				t.Fatal("revoked image request changed stored files", files, err)
+			}
+		})
+	}
+}
+
+func TestSessionIssuanceRejectsChangedAccount(t *testing.T) {
+	for _, change := range []string{"password", "role", "deletion"} {
+		t.Run(change, func(t *testing.T) {
+			a := testApp(t)
+			owner := client(a, "192.0.2.1")
+			u := owner.register(t, "owner")
+			var verifiedHash string
+			if err := a.db.QueryRow("SELECT password FROM users WHERE id=?", u.ID).Scan(&verifiedHash); err != nil {
+				t.Fatal(err)
+			}
+			// Account changes after login's password check but before session insertion.
+			switch change {
+			case "password":
+				if err := a.provisionUser(u.Username, "new-password-456", u.Role); err != nil {
+					t.Fatal(err)
+				}
+			case "role":
+				if _, err := a.changeUserRole(u.Username, "reviewer"); err != nil {
+					t.Fatal(err)
+				}
+			case "deletion":
+				if _, err := a.db.Exec("DELETE FROM users WHERE id=?", u.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			w := httptest.NewRecorder()
+			err := a.setSession(w, &u, verifiedHash)
+			var apiErr *apiError
+			if !errors.As(err, &apiErr) || apiErr.status != http.StatusUnauthorized {
+				t.Fatal("stale login issued session", err)
+			}
+			var count int
+			if err = a.db.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&count); err != nil || count != 0 || len(w.Result().Cookies()) != 0 {
+				t.Fatal("stale login left session or cookie", count, err)
+			}
+		})
 	}
 }
