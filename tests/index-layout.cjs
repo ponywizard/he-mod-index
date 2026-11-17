@@ -52,6 +52,7 @@ const gallery = [1, 2, 3].map(n => ({image_url: `/uploads/gallery-${n}.jpg`, thu
 const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGpcAAAAASUVORK5CYII=', 'base64');
 const files = new Map(['index.html', 'app.js', 'editor.js', 'style.css', 'default-mod.png'].map(name => [name, fs.readFileSync(path.join(root, 'web', name))]));
 let session;
+let catalog = mods;
 let fixtureUser = {id: 1, username: 'owner', role: 'user'};
 let pendingImport = true;
 let publishedImport = null;
@@ -90,8 +91,8 @@ async function screenshot(name) {
     else if (url.pathname === '/api/admin/imports/10') {publishedImport = JSON.parse(request.request.postData); pendingImport = false; body = Buffer.from('{"id":1,"warning":""}');}
     else if (/^\/api\/mods\/\d+\/images$/.test(url.pathname)) body = Buffer.from(JSON.stringify(url.pathname.includes('/1/') ? gallery : url.pathname.includes('/3/') ? [gallery[0]] : []));
     else if (/^\/api\/mods\/\d+\/history$/.test(url.pathname)) body = Buffer.from(JSON.stringify([{version: '1.0', posted_at: timestamp, source_url: 'https://desuarchive.org/mlp/thread/1/#2', source: importFixture.source, short_description: 'Original release', description: '<img src=x onerror="window.unsafe=true"> Historical notes', downloads: mods[0].downloads}]));
-    else if (url.pathname === '/api/mods') body = Buffer.from(JSON.stringify(mods));
-    else if (/^\/api\/mods\/\d+$/.test(url.pathname)) body = Buffer.from(JSON.stringify(mods.find(m => m.id === Number(url.pathname.split('/').pop()))));
+    else if (url.pathname === '/api/mods') body = Buffer.from(JSON.stringify(catalog));
+    else if (/^\/api\/mods\/\d+$/.test(url.pathname)) body = Buffer.from(JSON.stringify(catalog.find(m => m.id === Number(url.pathname.split('/').pop()))));
     else if (/^\/api\/source-posts\/\d+\/image$/.test(url.pathname) || /^\/uploads\//.test(url.pathname)) {body = image; type = 'image/png';}
     else {body = Buffer.alloc(0); status = url.pathname === '/favicon.ico' ? 204 : 404;}
     call('Fetch.fulfillRequest', {requestId: request.requestId, responseCode: status, responseHeaders: [{name: 'Content-Type', value: type}, {name: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"}], body: body.toString('base64')}, message.sessionId).catch(error => {if (!closing) errors.push(error.message);});
@@ -243,8 +244,52 @@ async function screenshot(name) {
     assert.deepEqual(publishedImport, {action, target_id: target, revision: target ? 1 : 0});
     assert.equal(await evaluate("document.querySelector('#message').className"), 'success');
   }
+  // Pagination runs against the whole sorted/filtered catalog, with independent page controls.
+  catalog = [...mods, ...Array.from({length: 19}, (_, n) => ({...mods[2], id: n + 5, name: `Paged mod ${String(n + 5).padStart(2, '0')}`, updated_at: timestamp + n + 5, description: 'Another catalog entry.'}))];
+  await call('Emulation.setDeviceMetricsOverride', {width: 1200, height: 850, deviceScaleFactor: 1, mobile: false}, session);
+  await call('Page.navigate', {url: 'http://he-mod-index.test/'}, session);
+  await until("document.querySelectorAll('[data-index-mod]').length === 10");
+  assert.equal(await evaluate("document.querySelector('[data-index-mod]').dataset.indexMod"), '23');
+  assert.equal(await evaluate("document.querySelector('[data-pagination] [role=status]').textContent"), 'Page 1 of 3');
+  assert(await evaluate("document.querySelector('[data-page-step=\"-1\"]').disabled"));
+  await evaluate("document.querySelector('[data-page-step=\"1\"]').click()");
+  assert.equal(await evaluate("document.querySelector('[data-index-mod]').dataset.indexMod"), '13');
+  assert.equal(await evaluate("document.activeElement.dataset.pageStep"), '1');
+  await screenshot('pagination-desktop.png');
+  await evaluate("document.querySelector('[data-page-step=\"1\"]').click()");
+  assert.equal(await evaluate("document.querySelectorAll('[data-index-mod]').length"), 3);
+  assert(await evaluate("[...document.querySelectorAll('[data-page-step=\"1\"]')].every(b => b.disabled)"));
+  await evaluate("document.querySelector('[data-page-step=\"-1\"]').click()");
+  assert.equal(await evaluate("document.querySelectorAll('[data-index-mod]').length"), 10);
+  await evaluate("document.querySelector('[data-sort=name]').click()");
+  assert.equal(await evaluate("document.querySelector('[data-pagination] [role=status]').textContent"), 'Page 1 of 3');
+  assert.equal(await evaluate("document.querySelector('[data-index-mod]').dataset.indexMod"), '2');
+  await evaluate("document.querySelector('[data-page-step=\"1\"]').click()");
+  const pageTwo = await evaluate("[...document.querySelectorAll('[data-index-mod]')].map(row => row.dataset.indexMod)");
+  await evaluate("document.querySelector('a.mod-name').click()");
+  await until("Boolean(document.querySelector('.detail-header'))");
+  await evaluate('history.back()');
+  await until("Boolean(document.querySelector('[data-pagination]'))");
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-index-mod]')].map(row => row.dataset.indexMod)"), pageTwo);
+  await evaluate("{const input = document.querySelector('#filter'); input.value = 'unique-search-word'; input.dispatchEvent(new Event('input'));}");
+  assert.equal(await evaluate("document.querySelectorAll('[data-index-mod]').length"), 1);
+  assert.equal(await evaluate("document.querySelector('[data-index-mod]').dataset.indexMod"), '1');
+  assert(await evaluate("[...document.querySelectorAll('[data-pagination]')].every(p => p.hidden)"));
+  await evaluate("document.querySelector('#filter').value = ''; document.querySelector('#filter').dispatchEvent(new Event('input'))");
+  assert.equal(await evaluate("document.querySelector('[data-pagination] [role=status]').textContent"), 'Page 1 of 3');
+  await call('Emulation.setDeviceMetricsOverride', {width: 390, height: 844, deviceScaleFactor: 1, mobile: true}, session);
+  assert(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), 'Pagination overflows on mobile');
+  await screenshot('pagination-mobile.png');
+  await evaluate("document.querySelector('[data-page-step=\"1\"]').click(); document.querySelector('[data-page-step=\"1\"]').click()");
+  catalog = mods;
+  await evaluate('render()');
+  await until("document.querySelectorAll('[data-index-mod]').length === 4");
+  assert(await evaluate("[...document.querySelectorAll('[data-pagination]')].every(p => p.hidden)"));
+  await evaluate("document.querySelector('#filter').value = 'no-matches-in-catalog'; document.querySelector('#filter').dispatchEvent(new Event('input'))");
+  assert.equal(await evaluate("document.querySelectorAll('[data-index-mod]').length"), 0);
+  assert.equal(await evaluate("document.querySelector('.empty').textContent"), 'No matches.');
   assert.deepEqual(errors, [], `Browser errors: ${errors.join('\n')}`);
-  console.log(`Browser checks passed: column order, post styling, equal collapsed row heights (${heights[0]}px desktop), text truncation, Show more/less, sorting, full-text filtering, escaped content, mobile scrolling, local fallback images, optional image input, anonymous navigation, admin import resolution, image galleries, source captions, viewer navigation, and slideshow cleanup.`);
+  console.log(`Browser checks passed: column order, post styling, equal collapsed row heights (${heights[0]}px desktop), text truncation, Show more/less, sorting, full-text filtering, escaped content, mobile scrolling, local fallback images, optional image input, anonymous navigation, admin import resolution, pagination/search/sort/page retention, image galleries, source captions, viewer navigation, and slideshow cleanup.`);
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   closing = true;
   if (browser.exitCode === null && !browser.signalCode) {

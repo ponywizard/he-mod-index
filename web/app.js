@@ -7,6 +7,8 @@ let mods = [];
 let routeVersion = 0;
 let sort = {key: 'updated_at', direction: -1};
 let filter = '';
+const MODS_PER_PAGE = 10;
+let indexPageNumber = 1;
 let disposeEditor = null;
 let disposeGallery = null;
 const expandedMods = new Set();
@@ -61,12 +63,19 @@ function indexTable() {
   const terms = filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = mods.filter(m => terms.every(t => `${m.name} ${m.author} ${m.short_description} ${m.description} ${m.version} ${m.game_version} ${(m.downloads || []).map(d => d.filename).join(' ')}`.toLowerCase().includes(t)));
   filtered.sort((a, b) => {const av = a[sort.key], bv = b[sort.key]; const result = typeof av === 'string' ? av.localeCompare(bv) : av - bv; return result * sort.direction || b.id - a.id;});
+  const pageCount = Math.max(1, Math.ceil(filtered.length / MODS_PER_PAGE));
+  indexPageNumber = Math.min(Math.max(1, indexPageNumber), pageCount);
+  const visible = filtered.slice((indexPageNumber - 1) * MODS_PER_PAGE, indexPageNumber * MODS_PER_PAGE);
+  for (const pager of document.querySelectorAll('[data-pagination]')) {
+    pager.hidden = pageCount <= 1;
+    pager.innerHTML = `<button type="button" data-page-step="-1"${indexPageNumber === 1 ? ' disabled' : ''}>Previous</button><span role="status">Page ${indexPageNumber} of ${pageCount}</span><button type="button" data-page-step="1"${indexPageNumber === pageCount ? ' disabled' : ''}>Next</button>`;
+  }
   const cols = [['name', 'Description'], ['rating', 'Rating'], ['created_at', 'Added'], ['updated_at', 'Updated']];
   document.querySelector('#mod-count').textContent = `${filtered.length} / ${mods.length} mods`;
   document.querySelector('#mod-table').innerHTML = `<table class="index">
     <colgroup><col class="index-image"><col><col class="index-rating"><col class="index-date"><col class="index-date"></colgroup>
     <thead><tr><th scope="col" aria-label="Image"></th>${cols.map(([key, label]) => `<th scope="col" aria-sort="${sort.key === key ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}"><button data-sort="${key}">${label}${sort.key === key ? (sort.direction === 1 ? ' ↑' : ' ↓') : ''}</button></th>`).join('')}</tr></thead>
-    <tbody>${filtered.length ? filtered.map(m => {
+    <tbody>${visible.length ? visible.map(m => {
       const expanded = expandedMods.has(m.id);
       const version = `${m.version}${m.game_version ? ` · HE ${m.game_version}` : ''}`;
       return `<tr data-index-mod="${m.id}"${expanded ? ' class="is-expanded"' : ''}>
@@ -107,8 +116,8 @@ function fitPostPreviews() {
 }
 async function indexPage(current) {
   const loaded = await api('/api/mods'); if (current !== routeVersion) return; mods = loaded;
-  view.innerHTML = `<div class="toolbar"><label for="filter">Filter</label><input id="filter" type="search" placeholder="Name, author, description…" value="${esc(filter)}" autocomplete="off"><span class="count" id="mod-count" role="status"></span></div><div class="scroll" id="mod-table"></div>`;
-  document.querySelector('#filter').addEventListener('input', event => {filter = event.target.value; indexTable();});
+  view.innerHTML = `<div class="toolbar"><label for="filter">Filter</label><input id="filter" type="search" placeholder="Name, author, description…" value="${esc(filter)}" autocomplete="off"><span class="count" id="mod-count" role="status"></span></div><nav class="pagination" data-pagination aria-label="Mod pages"></nav><div class="scroll" id="mod-table"></div><nav class="pagination" data-pagination aria-label="Mod pages at bottom"></nav>`;
+  document.querySelector('#filter').addEventListener('input', event => {filter = event.target.value; indexPageNumber = 1; indexTable();});
   indexTable();
   if (typeof ResizeObserver !== 'undefined') {
     postObserver = new ResizeObserver(queuePostLayout);
@@ -311,7 +320,15 @@ document.addEventListener('click', async event => {
   const button = event.target.closest('button'); if (!button) return;
   try {
     if (button.id === 'logout') {await api('/api/logout', {method: 'POST'}); await refreshSession(); navigate('/');}
-    if (button.dataset.sort) {sort = {key: button.dataset.sort, direction: sort.key === button.dataset.sort ? -sort.direction : (button.dataset.sort === 'name' ? 1 : -1)}; indexTable();}
+    if (button.dataset.sort) {sort = {key: button.dataset.sort, direction: sort.key === button.dataset.sort ? -sort.direction : (button.dataset.sort === 'name' ? 1 : -1)}; indexPageNumber = 1; indexTable();}
+    if (button.dataset.pageStep) {
+      const step = Number(button.dataset.pageStep);
+      indexPageNumber += step; indexTable();
+      const pager = document.querySelector('[data-pagination]');
+      const focus = pager.querySelector(`[data-page-step="${step}"]:not(:disabled)`) || pager.querySelector('button:not(:disabled)');
+      focus?.focus({preventScroll: true});
+      pager.scrollIntoView({block: 'start'});
+    }
     if (button.dataset.expandMod) {
       const id = Number(button.dataset.expandMod);
       if (expandedMods.has(id)) expandedMods.delete(id); else expandedMods.add(id);

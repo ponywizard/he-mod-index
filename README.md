@@ -118,6 +118,9 @@ choose their own admin/reviewer usernames in the wizard.
   appear below. Long heading text uses ellipses, with the full text available on hover.
   Description sorts alphabetically by mod name. Collapsed rows have a fixed height; Show more expands long posts inline
   and Show less restores the compact row. The text filter includes the full post.
+  The index shows 10 mods per page, after sorting and filtering the full catalog.
+  Opening a listing and returning keeps the page; changing the search or sort
+  starts at page one.
 - Admins can edit/remove any mod and remove other users in the web UI. Removing
   a user cascades through their mods, votes, sessions, and tokens.
   Removing a reviewer clears their visible checks. An admin cannot delete their
@@ -444,7 +447,7 @@ node tests/index-layout.cjs
 Set `CHROMIUM_BIN` if the executable is not named `chromium`. Add `--screenshots`
 to save desktop/mobile previews under the system temporary directory. The checks
 cover column order, compact row heights, post styling, expansion, sorting,
-filtering, and mobile scrolling. No frontend packages need to be installed.
+filtering, pagination, and mobile scrolling. No frontend packages need to be installed.
 
 The integration tests use isolated temporary databases and cover authentication,
 cooldowns, proxy handling, vote rules, approval revisions, upload tokens,
