@@ -8,6 +8,7 @@ let routeVersion = 0;
 let sort = {key: 'updated_at', direction: -1};
 let filter = '';
 let disposeEditor = null;
+let disposeGallery = null;
 const expandedMods = new Set();
 let postObserver = null;
 let postLayoutFrame = 0;
@@ -158,14 +159,72 @@ function releaseHistory(releases) {
   if (!releases.length) return '';
   return `<details class="release-history"><summary>Post history (${releases.length})</summary><ol>${releases.map(r => `<li><div class="history-heading">${link(r.source_url, r.version)} · <time datetime="${new Date(r.posted_at * 1000).toISOString()}">${date(r.posted_at)}</time></div><p>${esc(r.short_description)}</p>${r.description ? `<div class="description">${esc(r.description)}</div>` : ''}<ul class="downloads">${r.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul></li>`).join('')}</ol></details>`;
 }
+function imageCaption(im) {
+  return `<p>${esc(im.description)}</p><div class="image-source"><span>${im.version === 'Unversioned' ? 'Unversioned' : `Version ${esc(im.version)}`}</span> · ${link(im.source_url, 'Desuarchive post')} · ${date(im.posted_at)}</div>`;
+}
+function modGallery(images, name) {
+  if (!images.length) return '';
+  return `<section class="mod-gallery" aria-labelledby="gallery-title"><h3 id="gallery-title" class="section-title">Images</h3><div class="gallery-grid">${images.map((im, index) => `<figure><button type="button" class="gallery-open" data-gallery-image="${index}" aria-label="View ${esc(name)} image ${index + 1}"><img src="${esc(im.image_url)}" alt="${esc(name)} · ${esc(im.version)}" loading="lazy"></button><figcaption>${imageCaption(im)}</figcaption></figure>`).join('')}</div></section>`;
+}
+function wireGallery(images, name) {
+  if (!images.length) return;
+  view.insertAdjacentHTML('beforeend', `<dialog class="image-viewer" aria-labelledby="viewer-title"><div class="viewer-header"><h2 id="viewer-title">${esc(name)} images</h2><button type="button" data-viewer-close autofocus>Close</button></div><figure><img class="viewer-image" alt=""><figcaption></figcaption></figure><div class="viewer-controls"><button type="button" data-viewer-previous${images.length < 2 ? ' hidden' : ''}>Previous</button><span class="viewer-position" role="status"></span><button type="button" data-viewer-next${images.length < 2 ? ' hidden' : ''}>Next</button><button type="button" data-viewer-play aria-pressed="false"${images.length < 2 ? ' hidden' : ''}>Start slideshow</button><a class="viewer-original" target="_blank" rel="noopener">Open original</a></div></dialog>`);
+  const dialog = view.querySelector('.image-viewer');
+  const photo = dialog.querySelector('.viewer-image');
+  const play = dialog.querySelector('[data-viewer-play]');
+  let index = 0, timer = 0, opener = null;
+  function show(next) {
+    index = (next + images.length) % images.length;
+    const im = images[index];
+    photo.src = im.image_url;
+    photo.alt = `${name} · ${im.version} · image ${index + 1} of ${images.length}`;
+    dialog.querySelector('figcaption').innerHTML = imageCaption(im);
+    dialog.querySelector('.viewer-position').textContent = `${index + 1} / ${images.length}`;
+    dialog.querySelector('.viewer-original').href = im.image_url;
+  }
+  function pause() {
+    clearInterval(timer); timer = 0;
+    play.textContent = 'Start slideshow'; play.setAttribute('aria-pressed', 'false');
+    dialog.querySelector('.viewer-position').setAttribute('aria-live', 'polite');
+  }
+  for (const button of view.querySelectorAll('[data-gallery-image]')) button.addEventListener('click', () => {
+    opener = button;
+    show(Number(button.dataset.galleryImage));
+    dialog.showModal(); document.body.classList.add('viewer-open');
+  });
+  dialog.querySelector('[data-viewer-close]').addEventListener('click', () => dialog.close());
+  dialog.querySelector('[data-viewer-previous]').addEventListener('click', () => {pause(); show(index - 1);});
+  dialog.querySelector('[data-viewer-next]').addEventListener('click', () => {pause(); show(index + 1);});
+  play.addEventListener('click', () => {
+    if (timer) {pause(); return;}
+    play.textContent = 'Pause slideshow'; play.setAttribute('aria-pressed', 'true');
+    dialog.querySelector('.viewer-position').setAttribute('aria-live', 'off');
+    timer = setInterval(() => show(index + 1), 4000);
+  });
+  dialog.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault(); pause(); show(index + (event.key === 'ArrowLeft' ? -1 : 1));
+    }
+  });
+  dialog.addEventListener('click', event => {
+    if (event.target !== dialog) return;
+    const box = dialog.getBoundingClientRect();
+    if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) dialog.close();
+  });
+  dialog.addEventListener('close', () => {pause(); document.body.classList.remove('viewer-open'); if (opener?.isConnected) opener.focus();});
+  const onVisibility = () => {if (document.hidden) pause();};
+  document.addEventListener('visibilitychange', onVisibility);
+  disposeGallery = () => {
+    pause(); dialog.close(); dialog.remove(); document.body.classList.remove('viewer-open');
+    document.removeEventListener('visibilitychange', onVisibility);
+  };
+}
 async function detailPage(id, current) {
-  const [m, releases] = await Promise.all([api(`/api/mods/${id}`), api(`/api/mods/${id}/history`)]); if (current !== routeVersion) return;
+  const [m, releases, images] = await Promise.all([api(`/api/mods/${id}`), api(`/api/mods/${id}/history`), api(`/api/mods/${id}/images`)]); if (current !== routeVersion) return;
   const u = session.user, owner = u && (m.user_id === u.id || u.role === 'admin');
-  const hasScreenshot = m.image_url?.startsWith('/uploads/');
-  const displayImage = hasScreenshot ? m.image_url : DEFAULT_MOD_IMAGE;
-  const imageAlt = hasScreenshot ? `${m.name} screenshot` : 'Home: Equestria icon';
   document.title = `${m.name} — Home: Equestria mods`;
-  view.innerHTML = `<section class="panel"><div class="detail-header"><h2>${esc(m.name)}${badge(m)}</h2><span>${esc(m.version)}</span></div><p class="detail-meta">${esc(m.author)} · Added ${date(m.created_at)} · Updated ${date(m.updated_at)}${m.game_version ? ` · Home: Equestria ${esc(m.game_version)}` : ''}</p><p>${esc(m.short_description)}</p><div class="actions">${m.repository_url ? link(m.repository_url, 'Repository') : ''}${m.source_url ? link(m.source_url, 'Source post') : ''}${votes(m)}${owner ? `<a href="/mod/${m.id}/edit" data-nav>Edit</a><button class="link-button danger" data-delete-mod="${m.id}">Remove</button>` : ''}</div><h3 class="section-title">Downloads</h3><ul class="downloads">${m.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul><a href="${esc(displayImage)}" target="_blank" rel="noopener"><img class="screenshot" src="${esc(displayImage)}" alt="${esc(imageAlt)}" loading="lazy"></a>${m.description ? `<div class="description">${esc(m.description)}</div>` : ''}${releaseHistory(releases)}${m.approval !== 'none' ? `<p class="muted">${m.approval === 'current' ? 'Approved' : 'Earlier release approved'} by ${esc(m.approved_by)} · ${date(m.approved_at)}</p>` : ''}${u?.role === 'reviewer' ? `<div class="actions"><button data-approve="true" data-revision="${m.revision}" data-id="${m.id}">Approve this release</button>${m.approval !== 'none' ? `<button data-approve="false" data-revision="${m.revision}" data-id="${m.id}">Clear check</button>` : ''}</div>` : ''}</section>`;
+  view.innerHTML = `<section class="panel"><div class="detail-header"><h2>${esc(m.name)}${badge(m)}</h2><span>${esc(m.version)}</span></div><p class="detail-meta">${esc(m.author)} · Added ${date(m.created_at)} · Updated ${date(m.updated_at)}${m.game_version ? ` · Home: Equestria ${esc(m.game_version)}` : ''}</p><p>${esc(m.short_description)}</p><div class="actions">${m.repository_url ? link(m.repository_url, 'Repository') : ''}${m.source_url ? link(m.source_url, 'Source post') : ''}${votes(m)}${owner ? `<a href="/mod/${m.id}/edit" data-nav>Edit</a><button class="link-button danger" data-delete-mod="${m.id}">Remove</button>` : ''}</div><h3 class="section-title">Downloads</h3><ul class="downloads">${m.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul>${m.description ? `<div class="description">${esc(m.description)}</div>` : ''}${releaseHistory(releases)}${m.approval !== 'none' ? `<p class="muted">${m.approval === 'current' ? 'Approved' : 'Earlier release approved'} by ${esc(m.approved_by)} · ${date(m.approved_at)}</p>` : ''}${u?.role === 'reviewer' ? `<div class="actions"><button data-approve="true" data-revision="${m.revision}" data-id="${m.id}">Approve this release</button>${m.approval !== 'none' ? `<button data-approve="false" data-revision="${m.revision}" data-id="${m.id}">Clear check</button>` : ''}</div>` : ''}${modGallery(images, m.name)}</section>`;
+  wireGallery(images, m.name);
 }
 async function accountPage(current) {
   if (!needUser()) return;
@@ -194,6 +253,7 @@ async function adminPage(current) {
   view.innerHTML = `<h2>Admin</h2>${importErrors.length ? `<h3 class="section-title">Import errors</h3>${importErrors.map(p => `<section class="panel"><p>${link(p.source.url, `Post ${p.id}`)} · ${esc(p.reason)}</p><button data-import-retry="${p.id}">Retry next poll</button> <button class="link-button danger" data-import-dismiss="${p.id}">Dismiss</button></section>`).join('')}` : ''}<h3 class="section-title">Pending imports</h3>${imports.map(c => `<section class="panel" data-import="${c.id}"><h3>${esc(c.entry.name)} · ${esc(c.entry.version)}</h3><p>${esc(c.reason)}</p><p>${esc(c.entry.short_description)}</p><details><summary>Description and source</summary><div class="description">${esc(c.entry.description)}</div><p>${link(c.source.url, 'Source post')}</p><div class="description">${esc(c.source.text)}</div></details><ul>${c.entry.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul><label>Publish to <select data-import-target><option value="0" data-revision="0">New listing</option>${allMods.map(m => `<option value="${m.id}" data-revision="${m.revision}">${esc(m.name)} · ${esc(m.version)}</option>`).join('')}</select></label><div class="actions"><button data-import-publish="${c.id}">Publish unreviewed</button><button class="link-button danger" data-import-reject="${c.id}">Dismiss</button></div></section>`).join('') || '<p>No pending imports.</p>'}<h3 class="section-title">Users</h3><div class="scroll"><table><thead><tr><th>Username</th><th>Role</th><th>Registered</th><th>Mods</th><th>Votes</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td class="date">${date(u.created_at)}</td><td>${u.mods}</td><td>${u.votes}</td><td>${u.id !== session.user.id ? `<button class="link-button danger" data-delete-user="${u.id}" data-name="${esc(u.username)}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div><h3 class="section-title">Mods</h3><div class="scroll"><table><thead><tr><th>Name</th><th>Author</th><th></th></tr></thead><tbody>${allMods.map(m => `<tr><td><a href="/mod/${m.id}" data-nav>${esc(m.name)}</a></td><td>${esc(usernames.get(m.user_id) || m.author)}</td><td><button class="link-button danger" data-delete-mod="${m.id}">Remove</button></td></tr>`).join('') || '<tr><td colspan="3">No mods.</td></tr>'}</tbody></table></div>`;
 }
 async function render() {
+  if (disposeGallery) {disposeGallery(); disposeGallery = null;}
   if (postObserver) {postObserver.disconnect(); postObserver = null;}
   cancelAnimationFrame(postLayoutFrame);
   if (disposeEditor) {disposeEditor(); disposeEditor = null;}

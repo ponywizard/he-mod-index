@@ -307,6 +307,9 @@ func (a *app) updateMod(w http.ResponseWriter, r *http.Request) error {
 		return problem(409, "Mod changed. Reload and try again.")
 	}
 	if media.ImageURL != old.ImageURL {
+		if err = updateGalleryImage(tx, old.ID, old.ImageURL, media, false); err != nil {
+			return err
+		}
 		if _, err = tx.Exec("UPDATE mods SET thumbnail_url=?,crop_x=?,crop_y=?,crop_size=? WHERE id=?", media.ThumbnailURL, media.Crop.X, media.Crop.Y, media.Crop.Size, old.ID); err != nil {
 			return err
 		}
@@ -334,6 +337,10 @@ func (a *app) deleteMod(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	defer tx.Rollback()
+	paths, err := modImagePaths(tx, m.ID)
+	if err != nil {
+		return err
+	}
 	var imageURL string
 	if err = tx.QueryRow("DELETE FROM mods WHERE id=? AND user_id=? RETURNING image_url", m.ID, m.UserID).Scan(&imageURL); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -344,7 +351,9 @@ func (a *app) deleteMod(w http.ResponseWriter, r *http.Request) error {
 	if err = tx.Commit(); err != nil {
 		return err
 	}
-	a.removeImage(imageURL, m.ID)
+	for _, path := range paths {
+		a.removeImage(path, m.ID)
+	}
 	return writeJSON(w, 200, map[string]bool{"ok": true})
 }
 func (a *app) vote(w http.ResponseWriter, r *http.Request) error {

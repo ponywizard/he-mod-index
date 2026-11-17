@@ -55,7 +55,7 @@ func (a *app) deleteUser(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query("SELECT id,image_url FROM mods WHERE user_id=?", id)
+	rows, err := tx.Query("SELECT id,image_url FROM mods WHERE user_id=? UNION SELECT g.mod_id,g.image_url FROM mod_images g JOIN mods m ON m.id=g.mod_id WHERE m.user_id=?", id, id)
 	if err != nil {
 		return err
 	}

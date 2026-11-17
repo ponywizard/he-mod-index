@@ -48,6 +48,7 @@ const mods = [
   {id: 3, name: 'Simple mod', author: 'mod_author', short_description: 'A short subject', description: 'A short description that fits.', thumbnail_url: '/uploads/test.jpg', rating: 0},
   {id: 4, name: 'No image', author: 'Anonymous', short_description: 'No long description', description: '', thumbnail_url: '', rating: 4},
 ].map(m => ({user_id: 1, revision: 1, version: '1.2.0', game_version: '0.3.0-maredev', created_at: timestamp, updated_at: timestamp + m.id, approval: 'none', upvotes: 0, downvotes: 0, my_vote: 0, downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}], image_url: m.thumbnail_url ? '/uploads/test.jpg' : '', ...m}));
+const gallery = [1, 2, 3].map(n => ({image_url: `/uploads/gallery-${n}.jpg`, thumbnail_url: `/uploads/gallery-${n}-thumb.jpg`, source_url: `https://desuarchive.org/mlp/thread/40000000/#4000000${n}`, version: `${n}.0`, description: n === 1 ? '<img src=x onerror="window.unsafe=true"> Source image' : `Screenshot for version ${n}.0`, posted_at: timestamp + n}));
 const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGpcAAAAASUVORK5CYII=', 'base64');
 const files = new Map(['index.html', 'app.js', 'editor.js', 'style.css', 'default-mod.png'].map(name => [name, fs.readFileSync(path.join(root, 'web', name))]));
 let session;
@@ -87,6 +88,7 @@ async function screenshot(name) {
     else if (url.pathname === '/api/admin/import-errors') body = Buffer.from('[]');
     else if (url.pathname === '/api/admin/imports') body = Buffer.from(JSON.stringify(pendingImport ? [importFixture] : []));
     else if (url.pathname === '/api/admin/imports/10') {publishedImport = JSON.parse(request.request.postData); pendingImport = false; body = Buffer.from('{"id":1,"warning":""}');}
+    else if (/^\/api\/mods\/\d+\/images$/.test(url.pathname)) body = Buffer.from(JSON.stringify(url.pathname.includes('/1/') ? gallery : url.pathname.includes('/3/') ? [gallery[0]] : []));
     else if (/^\/api\/mods\/\d+\/history$/.test(url.pathname)) body = Buffer.from(JSON.stringify([{version: '1.0', posted_at: timestamp, source_url: 'https://desuarchive.org/mlp/thread/1/#2', short_description: 'Original release', description: '<img src=x onerror="window.unsafe=true"> Historical notes', downloads: mods[0].downloads}]));
     else if (url.pathname === '/api/mods') body = Buffer.from(JSON.stringify(mods));
     else if (/^\/api\/mods\/\d+$/.test(url.pathname)) body = Buffer.from(JSON.stringify(mods.find(m => m.id === Number(url.pathname.split('/').pop()))));
@@ -144,12 +146,58 @@ async function screenshot(name) {
   assert(Math.max(...mobile.heights) - Math.min(...mobile.heights) < 1, `Mobile description expanded rows: ${mobile.heights}`);
   await screenshot('index-mobile.png');
   await evaluate("document.querySelector('a.mod-name[href=\"/mod/4\"]').click()");
-  await until("document.querySelector('.screenshot')?.naturalWidth === 256");
-  assert.equal(await evaluate("document.querySelector('.screenshot').getAttribute('src')"), '/default-mod.png');
+  await until("Boolean(document.querySelector('.detail-header'))");
+  assert.equal(await evaluate("document.querySelectorAll('#view img').length"), 0);
+  assert.equal(await evaluate("document.querySelector('.mod-gallery')"), null);
   assert.equal(await evaluate("document.querySelector('.release-history summary').textContent"), 'Post history (1)');
   await evaluate("document.querySelector('.release-history summary').click()");
   assert.equal(await evaluate("document.querySelector('.release-history .description').textContent"), '<img src=x onerror="window.unsafe=true"> Historical notes');
   assert.equal(await evaluate('window.unsafe'), undefined);
+  // Multi-image gallery: bottom placement, captions, keyboard navigation and slideshow.
+  await evaluate("document.querySelector('nav a[href=\"/\"]').click()");
+  await until("Boolean(document.querySelector('a.mod-name[href=\"/mod/1\"]'))");
+  await evaluate("document.querySelector('a.mod-name[href=\"/mod/1\"]').click()");
+  await until("document.querySelectorAll('[data-gallery-image]').length === 3");
+  assert(await evaluate("document.querySelector('#view > .panel').lastElementChild.classList.contains('mod-gallery')"));
+  assert.equal(await evaluate("document.querySelectorAll('#view img[src=\"/default-mod.png\"]').length"), 0);
+  assert.equal(await evaluate("document.querySelector('.gallery-grid figcaption p').textContent"), gallery[0].description);
+  assert.equal(await evaluate("document.querySelector('.gallery-grid .image-source a').href"), gallery[0].source_url);
+  assert.equal(await evaluate("document.querySelector('.gallery-grid .image-source span').textContent"), 'Version 1.0');
+  assert(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"));
+  await evaluate("document.querySelector('[data-gallery-image=\"0\"]').click()");
+  assert(await evaluate("document.querySelector('.image-viewer').open"));
+  assert.equal(await evaluate("document.querySelector('.viewer-position').textContent"), '1 / 3');
+  await evaluate("document.querySelector('[data-viewer-next]').click()");
+  assert.equal(await evaluate("document.querySelector('.viewer-position').textContent"), '2 / 3');
+  await call('Input.dispatchKeyEvent', {type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37}, session);
+  assert.equal(await evaluate("document.querySelector('.viewer-position').textContent"), '1 / 3');
+  await evaluate("document.querySelector('[data-viewer-previous]').click()");
+  assert.equal(await evaluate("document.querySelector('.viewer-position').textContent"), '3 / 3');
+  await evaluate("document.querySelector('[data-viewer-play]').click()");
+  assert.equal(await evaluate("document.querySelector('[data-viewer-play]').getAttribute('aria-pressed')"), 'true');
+  await until("document.querySelector('.viewer-position').textContent === '1 / 3'");
+  await evaluate("document.querySelector('[data-viewer-play]').click()");
+  assert.equal(await evaluate("document.querySelector('[data-viewer-play]').textContent"), 'Start slideshow');
+  await screenshot('gallery-mobile-viewer.png');
+  await call('Input.dispatchKeyEvent', {type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27}, session);
+  await call('Input.dispatchKeyEvent', {type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27}, session);
+  await until("!document.querySelector('.image-viewer').open && !document.body.classList.contains('viewer-open')");
+  assert.equal(await evaluate("document.activeElement.dataset.galleryImage"), '0');
+  assert.equal(await evaluate('window.unsafe'), undefined);
+  await call('Emulation.setDeviceMetricsOverride', {width: 1200, height: 850, deviceScaleFactor: 1, mobile: false}, session);
+  await evaluate("document.querySelector('.mod-gallery').scrollIntoView()");
+  await screenshot('gallery-desktop.png');
+  await evaluate("document.querySelector('[data-gallery-image=\"1\"]').click()");
+  await screenshot('gallery-desktop-viewer.png');
+  await evaluate("document.querySelector('[data-viewer-play]').click(); document.querySelector('nav a[href=\"/\"]').click()");
+  await until("Boolean(document.querySelector('a.mod-name[href=\"/mod/3\"]'))");
+  assert.equal(await evaluate("document.querySelector('.image-viewer')"), null);
+  assert.equal(await evaluate("document.body.classList.contains('viewer-open')"), false);
+  await evaluate("document.querySelector('a.mod-name[href=\"/mod/3\"]').click()");
+  await until("document.querySelectorAll('[data-gallery-image]').length === 1");
+  await evaluate("document.querySelector('[data-gallery-image]').click()");
+  assert.equal(await evaluate("document.querySelector('[data-viewer-play]').hidden && document.querySelector('[data-viewer-next]').hidden"), true);
+  await evaluate("document.querySelector('[data-viewer-close]').click()");
   await evaluate("document.querySelector('nav a[href=\"/submit\"]').click()");
   await until("Boolean(document.querySelector('#mod-form'))");
   assert.equal(await evaluate("document.querySelector('#image-editor legend').textContent"), 'Image (optional)');
@@ -172,7 +220,7 @@ async function screenshot(name) {
   await until("!document.querySelector('[data-import-publish]')");
   assert.deepEqual(publishedImport, {action: 'publish', target_id: 1, revision: 1});
   assert.deepEqual(errors, [], `Browser errors: ${errors.join('\n')}`);
-  console.log(`Browser checks passed: column order, post styling, equal collapsed row heights (${heights[0]}px desktop), text truncation, Show more/less, sorting, full-text filtering, escaped content, mobile scrolling, local fallback images, optional image input, anonymous navigation, and admin import resolution.`);
+  console.log(`Browser checks passed: column order, post styling, equal collapsed row heights (${heights[0]}px desktop), text truncation, Show more/less, sorting, full-text filtering, escaped content, mobile scrolling, local fallback images, optional image input, anonymous navigation, admin import resolution, image galleries, source captions, viewer navigation, and slideshow cleanup.`);
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   closing = true;
   if (browser.exitCode === null && !browser.signalCode) {

@@ -41,18 +41,18 @@ func parseIngest(args []string, out io.Writer) (ingestOptions, error) {
 	fs.StringVar(&o.sources, "sources", "", "read saved archive JSON files from a directory")
 	fs.StringVar(&o.from, "from", "", "staging SQLite database for merge")
 	fs.StringVar(&o.labels, "labels", "", "eval JSON: array of {post_id,release}")
-	fs.Int64Var(&o.owner, "owner", 0, "existing admin owner ID (0 stages only, or summarizes all imported listings)")
+	fs.Int64Var(&o.owner, "owner", 0, "existing admin owner ID (0 stages only, or summarizes/backfills all imports)")
 	fs.Float64Var(&o.budget, "budget", 5, "cumulative API spending cap in USD for this database")
 	fs.BoolVar(&o.collectOnly, "collect-only", false, "collect source posts without API calls or publication")
 	fs.Usage = func() {
-		fmt.Fprintln(out, "Usage: he-mod-index ingest hydrate|poll|process|status|eval|merge|summarize [flags]\nUses DATA_DIR. hydrate collects archive threads; poll discovers and reads live threads.\nprocess resumes saved work; eval measures classifier recall/precision on labeled posts.")
+		fmt.Fprintln(out, "Usage: he-mod-index ingest hydrate|poll|process|status|eval|merge|summarize|images [flags]\nUses DATA_DIR. hydrate collects archive threads; poll discovers and reads live threads.\nprocess resumes saved work; eval measures classifier recall/precision on labeled posts.")
 		fs.PrintDefaults()
 	}
 	if o.command == "--help" || o.command == "-h" {
 		fs.Usage()
 		return o, flag.ErrHelp
 	}
-	if o.command != "hydrate" && o.command != "poll" && o.command != "process" && o.command != "status" && o.command != "eval" && o.command != "merge" && o.command != "summarize" {
+	if o.command != "hydrate" && o.command != "poll" && o.command != "process" && o.command != "status" && o.command != "eval" && o.command != "merge" && o.command != "summarize" && o.command != "images" {
 		return o, errors.New("unknown ingest command; use ingest --help")
 	}
 	if err := fs.Parse(args[1:]); err != nil {
@@ -363,6 +363,12 @@ func (a *app) runIngest(ctx context.Context, o ingestOptions, out io.Writer) err
 		if err = a.db.QueryRow("SELECT role FROM users WHERE id=?", o.owner).Scan(&role); err != nil || role != "admin" {
 			return errors.New("--owner must identify an existing admin account")
 		}
+	}
+	if o.command == "images" {
+		if err = a.backfillGallery(ctx, o.owner); err != nil {
+			return err
+		}
+		return a.ingestionStatus(out)
 	}
 	if o.command == "summarize" {
 		c, err := newModelClient(a, o.extractModel, int64(o.budget*1e6), o.envFile)

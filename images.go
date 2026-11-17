@@ -215,7 +215,7 @@ func cropFromQuery(r *http.Request) (*cropRect, error) {
 	}
 	return &c, nil
 }
-func (a *app) replaceImage(w http.ResponseWriter, i identity, m mod, media storedImage) error {
+func (a *app) replaceImage(w http.ResponseWriter, i identity, m mod, media storedImage, recrop bool) error {
 	saved := false
 	defer func() {
 		if !saved {
@@ -234,6 +234,9 @@ func (a *app) replaceImage(w http.ResponseWriter, i identity, m mod, media store
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		return problem(409, "Mod changed. Reload and try again.")
+	}
+	if err = updateGalleryImage(tx, m.ID, m.ImageURL, media, recrop); err != nil {
+		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return err
@@ -273,7 +276,7 @@ func (a *app) uploadImage(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return a.replaceImage(w, i, m, media)
+	return a.replaceImage(w, i, m, media, false)
 }
 func (a *app) recropImage(w http.ResponseWriter, r *http.Request) error {
 	i, m, err := a.ownedMod(r)
@@ -307,7 +310,7 @@ func (a *app) recropImage(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	return a.replaceImage(w, i, m, media)
+	return a.replaceImage(w, i, m, media, true)
 }
 func (a *app) previewImage(w http.ResponseWriter, r *http.Request) error {
 	if _, err := a.require(r, false); err != nil {

@@ -79,12 +79,12 @@ choose their own admin/reviewer usernames in the wizard.
   game-version field records compatibility.
 - Images are optional. Mods without an image show the bundled
   [Home: Equestria icon](https://raw.githubusercontent.com/homedevanon/home-equestria/refs/heads/main/icon.png)
-  in the index and on their detail page. The default is served locally and does
-  not become an upload owned by the mod author.
+  in the index. Detail pages show only retained thread images, with no placeholder.
+  The default is served locally and does not become an upload owned by the mod author.
 - Screenshots can be uploaded or imported from a public image URL. Both are
   hosted locally. The editor provides a square thumbnail crop with drag, zoom,
-  keyboard, and position controls. The full screenshot is kept for the detail
-  page; a separate 256×256 JPEG thumbnail appears in the first index column.
+  keyboard, and position controls. Full originals are retained; a separate 256×256
+  JPEG thumbnail appears in the first index column.
   Crop changes preserve the full screenshot. Replacing/removing an image or
   deleting its mod/user cleans up both files. PNG/JPEG/GIF input is limited to
   4 MiB, 4,096 pixels per side, and 12 megapixels; GIFs use the first frame.
@@ -92,6 +92,15 @@ choose their own admin/reviewer usernames in the wizard.
   pin DNS resolution, do not use environment proxies, and time out after 12s.
   Image work has a separate concurrency limit from password hashing, so slow
   image requests do not consume login, registration, or password-change slots.
+- Thread images appear in a gallery at the bottom of each detail page. Captions
+  show the associated announcement's description, version, date, and Desuarchive
+  post link. Click an image for the viewer: Previous/Next, arrow keys, Escape to
+  close, and an optional four-second slideshow. Slideshows pause when closed,
+  navigating away, or hiding the tab. A release without a stated version is
+  labeled Unversioned. Manual index covers are not assigned thread provenance.
+  Automatic image replacements retain earlier source images. Recropping a cover
+  keeps its gallery attribution; explicitly removing/replacing that cover removes
+  its gallery entry too. Mod/user deletion removes all retained image pairs.
 - Votes are public aggregates, with one up/down/neutral vote per account per mod,
   plus one active vote per IP per mod. A neutral vote removes the vote. Shared
   networks share the IP allowance. Changing IP does not allow a second account
@@ -170,6 +179,21 @@ This uses the same cumulative budget and `--extract-model`; completed overviews
 are skipped on retry. If a model call fails, the existing description is retained
 and the next run retries. Manual queue publication is summarized on the next poll
 (or via this command) when the target remains importer-owned and unmodified.
+
+Existing published announcements can have their images retained without model
+calls. After upgrading, run:
+
+```sh
+DATA_DIR=/path/to/live ./he-mod-index ingest images --owner 123
+```
+
+This uses the same public-IP-pinned image pipeline and limits. It keeps the index
+cover unchanged and reuses it only when its bytes match the fetched source image.
+Successful imports are skipped on retry; explicit removals stay removed. Listings
+with intervening manual edits are skipped to protect older image removals without
+gallery records. Known video links are skipped. New announcements retain their image during publication;
+this command can also retry failed downloads. No external requests run as part of
+the schema migration or a gallery read.
 
 The budget is cumulative across restarts and model evaluations. Requests reserve
 an upper estimate before sending; failed requests retain that reservation, and
@@ -395,7 +419,7 @@ multipart downloads, thumbnail crops, remote-image validation, migrations,
 account wizard validation/cancellation, and deletion cascades. Tests never write
 to the running site's data.
 
-Schema version 7 is recorded in `PRAGMA user_version`. A transaction migrates
+Schema version 8 is recorded in `PRAGMA user_version`. A transaction migrates
 older versions automatically, preserving listings, votes, and release checks.
 Version 4 removes the retired Hot metric's activity table and index.
 Version 5 preserves existing IDs and prevents reuse of subsequently deleted
@@ -405,6 +429,8 @@ and the current-thread setting.
 Version 7 adds overview progress and a history index, and backfills imported
 Added/Updated dates from the earliest/latest accepted source posts. Other
 listings keep their existing dates; content, ownership, and review checks remain intact.
+Version 8 adds retained source image records. Existing covers are preserved; run
+`ingest images` to populate galleries for previously published announcements.
 Existing accounts keep their username display until they enable Anonymous.
 Existing single downloads become one-item arrays with a filename inferred from the URL.
 Existing local screenshots get centered thumbnails on startup; authors can

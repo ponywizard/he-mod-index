@@ -191,7 +191,7 @@ func TestVersionSevenBackfillsOnlyImportedDates(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version int
-	if err = a.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 7 {
+	if err = a.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != schemaVersion {
 		t.Fatal(version, err)
 	}
 }

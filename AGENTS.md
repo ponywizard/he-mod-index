@@ -33,3 +33,7 @@
 - Preserve published source history. Imported Added/Updated dates belong to the
   earliest/latest accepted posts. Overview synthesis uses that history, preserves
   manual edits and release checks, and never advances source dates or revisions.
+- Keep gallery images attached to their published source entry and version; do not
+  infer provenance from the latest mod version or an arbitrary manual cover.
+  Retain historical images on automatic updates; remove all files on mod/user
+  deletion, preserve attribution on crops, and never resurrect explicit removals.

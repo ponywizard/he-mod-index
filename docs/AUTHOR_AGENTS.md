@@ -12,6 +12,11 @@ Do not register accounts or call write endpoints as part of this workflow.
   Each entry has `post_id`, `posted_at`, `source_url`, `name`, `version`,
   `short_description`, `description`, and `downloads`. Held imports are excluded.
   Listings without imported history return an empty array; unknown IDs return 404.
+- `GET /api/mods/{id}/images` returns retained thread images, newest first. Each
+  has local `image_url` and `thumbnail_url`, a Desuarchive `source_url`, `post_id`,
+  `posted_at`, `version`, and a plain-text `description` from its announcement.
+  Empty galleries return `[]`; unknown listings return 404. Images are displayed
+  at the bottom of the listing with a viewer and optional slideshow.
 - `GET /feed.xml` returns RSS 2.0 with the 100 most recently updated listings.
 - `GET /api/site` returns `current_thread`, the current thread URL.
 - `/mod/{id}` is the human-readable listing page.
@@ -26,8 +31,9 @@ is the latest; editing descriptions or images does not change these dates.
 Manually created listings use their index creation/edit dates. Imported descriptions
 summarize the accepted history; individual release notes remain in `/history`.
 Descriptions are plain text. `download_url` is a
-legacy alias for the first download. Empty image fields use the site's default
-icon; screenshots and square thumbnails are served locally.
+legacy alias for the first download. Empty index thumbnails use the site's default
+icon. Detail pages have no placeholder and show only retained thread images.
+Screenshots and square thumbnails are served locally.
 
 `author` and `approved_by` are public display labels, which may be `Anonymous`.
 They do not uniquely identify a person. `user_id` identifies the owning account;

@@ -37,7 +37,7 @@ func openDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 func migrateDB(db *sql.DB) (err error) {
 	// Table rebuilds require foreign_keys to be disabled before the transaction.
@@ -154,6 +154,12 @@ func migrateDB(db *sql.DB) (err error) {
 		if _, err = tx.Exec(schemaV7); err != nil {
 			return err
 		}
+		version = 7
+	}
+	if version == 7 {
+		if _, err = tx.Exec(schemaV8); err != nil {
+			return err
+		}
 	}
 	rows, err := tx.Query("PRAGMA foreign_key_check")
 	if err != nil {
@@ -170,6 +176,19 @@ func migrateDB(db *sql.DB) (err error) {
 	}
 	return tx.Commit()
 }
+
+// Each published announcement retains its local image independently of the
+// current index thumbnail. Empty URLs mark an explicitly removed image, so a
+// later historical import cannot resurrect it.
+const schemaV8 = `
+CREATE TABLE IF NOT EXISTS mod_images (
+ candidate_id INTEGER PRIMARY KEY REFERENCES ingest_candidates(id) ON DELETE CASCADE,
+ mod_id INTEGER NOT NULL REFERENCES mods(id) ON DELETE CASCADE,
+ image_url TEXT NOT NULL, thumbnail_url TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mod_images_mod ON mod_images(mod_id);
+PRAGMA user_version=8;
+`
 
 // Keep imported publication dates tied to the accepted source history. Summary
 // progress is separate from content so rebuilding an overview never bumps a release.
