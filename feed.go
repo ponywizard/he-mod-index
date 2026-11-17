@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/xml"
 	"fmt"
+	"html"
 	"net/http"
 	"time"
 )
@@ -43,7 +44,7 @@ func (a *app) feed(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		link := fmt.Sprintf("%s/mod/%d", a.cfg.PublicURL, m.ID)
-		f.Channel.Items = append(f.Channel.Items, rssItem{Title: m.Name + " — " + m.Version, Link: link, Description: m.ShortDescription, GUID: rssGUID{Value: fmt.Sprintf("%s#revision-%d", link, m.Revision)}, PubDate: time.Unix(m.UpdatedAt, 0).UTC().Format(time.RFC1123Z)})
+		f.Channel.Items = append(f.Channel.Items, rssItem{Title: m.Name + " — " + m.Version, Link: link, Description: html.EscapeString(m.ShortDescription), GUID: rssGUID{Value: fmt.Sprintf("%s#revision-%d", link, m.Revision)}, PubDate: time.Unix(m.UpdatedAt, 0).UTC().Format(time.RFC1123Z)})
 	}
 	if err = rows.Err(); err != nil {
 		return err
