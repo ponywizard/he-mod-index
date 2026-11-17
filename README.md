@@ -113,8 +113,8 @@ choose their own admin/reviewer usernames in the wizard.
   Release files should use immutable versioned URLs; replacing a remote binary
   at the same URL cannot be detected by the index.
 - The first index column is unlabeled and shows only the thumbnail. Description
-  contains the name link and release check, author in green, version
-  information, the short description as a post subject, and the long description.
+  contains the name link and release check, the short description as a post subject,
+  author in green with version information, and the long description.
   Description sorts alphabetically by mod name. Collapsed rows have a fixed height; Show more expands long posts inline
   and Show less restores the compact row. The text filter includes the full post.
 - Admins can edit/remove any mod and remove other users in the web UI. Removing
