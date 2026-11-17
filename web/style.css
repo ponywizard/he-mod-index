@@ -13,7 +13,7 @@ table.index{table-layout:fixed;min-width:840px}
 .description-cell{position:relative}
 .post-preview{position:absolute;inset:10px 12px;display:flex;flex-direction:column;min-height:0}
 .post-header{display:flex;align-items:baseline;gap:10px;white-space:nowrap;min-width:0;min-height:20px;flex:0 1 auto;margin-left:10px;overflow:hidden}
-.post-author{font-weight:700;color:#117743;max-width:50%;overflow:hidden;text-overflow:ellipsis}
+.post-author{font-weight:700;color:#117743;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .post-version{font-size:12px;color:#626e85;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .post-subject{font-weight:700;color:#0f0c5d;line-height:19px;flex-shrink:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;margin:1px 0 4px}
 .post-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:19px;flex:1 1 0;min-height:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical}
