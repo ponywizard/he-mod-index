@@ -59,6 +59,20 @@ function wireForm(id, handler) {
     try {await handler(form);} catch (error) {notice(error.message);} finally {if (button) button.disabled = false;}
   });
 }
+function indexURL(page) {
+  const query = new URLSearchParams();
+  if (page > 1) query.set('page', page);
+  if (filter) query.set('q', filter);
+  if (sort.key !== 'updated_at' || sort.direction !== -1) {
+    query.set('sort', sort.key); query.set('dir', sort.direction === 1 ? 'asc' : 'desc');
+  }
+  return '/' + (query.size ? `?${query}` : '');
+}
+function pageLink(page, label, control = '', disabled = false) {
+  const attrs = control ? ` data-page-control="${control}"` : '';
+  if (disabled) return `<span${attrs} aria-disabled="true">${label}</span>`;
+  return `<a href="${esc(indexURL(page))}" data-index-page="${page}"${attrs}${page === indexPageNumber && !control ? ' aria-current="page"' : ''}>${label}</a>`;
+}
 function indexTable() {
   const terms = filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = mods.filter(m => terms.every(t => `${m.name} ${m.author} ${m.short_description} ${m.description} ${m.version} ${m.game_version} ${(m.downloads || []).map(d => d.filename).join(' ')}`.toLowerCase().includes(t)));
@@ -68,9 +82,12 @@ function indexTable() {
   const visible = filtered.slice((indexPageNumber - 1) * MODS_PER_PAGE, indexPageNumber * MODS_PER_PAGE);
   for (const pager of document.querySelectorAll('[data-pagination]')) {
     pager.hidden = pageCount <= 1;
-    pager.innerHTML = `<button type="button" data-page-step="-1"${indexPageNumber === 1 ? ' disabled' : ''}>Previous</button><span role="status">Page ${indexPageNumber} of ${pageCount}</span><button type="button" data-page-step="1"${indexPageNumber === pageCount ? ' disabled' : ''}>Next</button>`;
+    pager.innerHTML = pageLink(1, 'First', 'first', indexPageNumber === 1) + pageLink(indexPageNumber - 1, 'Previous', 'previous', indexPageNumber === 1)
+      + Array.from({length: pageCount}, (_, i) => pageLink(i + 1, `[${i + 1}]`)).join('')
+      + pageLink(indexPageNumber + 1, 'Next', 'next', indexPageNumber === pageCount) + pageLink(pageCount, 'Last', 'last', indexPageNumber === pageCount);
   }
   const cols = [['name', 'Description'], ['rating', 'Rating'], ['created_at', 'Added'], ['updated_at', 'Updated']];
+  history.replaceState({}, '', indexURL(indexPageNumber));
   document.querySelector('#mod-count').textContent = `${filtered.length} / ${mods.length} mods`;
   document.querySelector('#mod-table').innerHTML = `<table class="index">
     <colgroup><col class="index-image"><col><col class="index-rating"><col class="index-date"><col class="index-date"></colgroup>
@@ -115,6 +132,11 @@ function fitPostPreviews() {
   }
 }
 async function indexPage(current) {
+  const query = new URLSearchParams(location.search), page = Number(query.get('page') || 1);
+  indexPageNumber = Number.isSafeInteger(page) && page > 0 ? page : 1;
+  filter = query.get('q') || '';
+  const key = query.get('sort');
+  sort = {key: ['name', 'rating', 'created_at', 'updated_at'].includes(key) ? key : 'updated_at', direction: query.get('dir') === 'asc' ? 1 : query.get('dir') === 'desc' ? -1 : key === 'name' ? 1 : -1};
   const loaded = await api('/api/mods'); if (current !== routeVersion) return; mods = loaded;
   view.innerHTML = `<div class="toolbar"><label for="filter">Filter</label><input id="filter" type="search" placeholder="Name, author, description…" value="${esc(filter)}" autocomplete="off"><span class="count" id="mod-count" role="status"></span></div><nav class="pagination" data-pagination aria-label="Mod pages"></nav><div class="scroll" id="mod-table"></div><nav class="pagination" data-pagination aria-label="Mod pages at bottom"></nav>`;
   document.querySelector('#filter').addEventListener('input', event => {filter = event.target.value; indexPageNumber = 1; indexTable();});
@@ -263,6 +285,23 @@ async function accountPage(current) {
   });
   wireForm('#password-form', async form => {await api('/api/password', {method: 'PUT', body: Object.fromEntries(new FormData(form))}); await refreshSession(); navigate('/login'); notice('Password changed. Sign in again.', true);});
 }
+function importOptions(allMods, selected = 0) {
+  return `<option value="0" data-revision="0">New listing</option>${allMods.map(m => `<option value="${m.id}" data-revision="${m.revision}" data-updated="${m.updated_at}"${m.id === selected ? ' selected' : ''}>${esc(m.name)} · ${esc(m.version)}</option>`).join('')}`;
+}
+function wireImportFilters(allMods) {
+  for (const panel of document.querySelectorAll('[data-import]')) {
+    panel.querySelector('[data-import-filter]').addEventListener('input', event => {
+      const terms = event.target.value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+      const select = panel.querySelector('[data-import-target]'), selected = Number(select.value);
+      const matches = allMods.filter(m => terms.every(term => `${m.name} ${m.version} #${m.id}`.toLowerCase().includes(term)));
+      const visible = allMods.filter(m => m.id === selected || matches.includes(m));
+      select.innerHTML = importOptions(visible, selected);
+      const empty = panel.querySelector('[data-import-no-matches]');
+      empty.hidden = matches.length > 0;
+      empty.textContent = selected ? 'No matches. Current selection kept.' : 'No matching listings.';
+    });
+  }
+}
 function importCard(c, allMods) {
   return `<section class="panel" data-import="${c.id}">
     <h3>${esc(c.entry.name)} · ${esc(c.entry.version)}</h3>
@@ -271,7 +310,8 @@ function importCard(c, allMods) {
     ${c.context?.length ? `<details class="source-context"><summary>Quoted posts (${c.context.length})</summary>${c.context.map(sourcePost).join('')}</details>` : ''}
     <details><summary>Extracted description</summary><div class="description">${esc(c.entry.description)}</div></details>
     <ul>${c.entry.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul>
-    <label>Listing <select data-import-target><option value="0" data-revision="0">New listing</option>${allMods.map(m => `<option value="${m.id}" data-revision="${m.revision}" data-updated="${m.updated_at}">${esc(m.name)} · ${esc(m.version)}</option>`).join('')}</select></label>
+    <div class="import-picker"><label for="import-filter-${c.id}">Find listing</label><input type="search" id="import-filter-${c.id}" data-import-filter placeholder="Name, version or #ID…" autocomplete="off"><small data-import-no-matches role="status" hidden></small>
+    <label>Listing <select data-import-target>${importOptions(allMods)}</select></label></div>
     <p class="muted" data-import-current hidden></p>
     <div class="actions"><button data-import-publish="${c.id}">Create listing</button><button data-import-history="${c.id}" hidden>Add to history</button><button class="link-button danger" data-import-reject="${c.id}">Dismiss</button></div>
     <p class="muted" data-import-help hidden>Add to history keeps the current release and cover. Update listing replaces release details.</p>
@@ -282,7 +322,9 @@ async function adminPage(current) {
   if (session.user.role !== 'admin') throw new Error('Admin access required.');
   const [users, allMods, imports, importErrors] = await Promise.all([api('/api/admin/users'), api('/api/mods'), api('/api/admin/imports'), api('/api/admin/import-errors')]); if (current !== routeVersion) return;
   const usernames = new Map(users.map(u => [u.id, u.username]));
-  view.innerHTML = `<h2>Admin</h2>${importErrors.length ? `<h3 class="section-title">Import errors</h3>${importErrors.map(p => `<section class="panel"><p>${link(p.source.url, `Post ${p.id}`)} · ${esc(p.reason)}</p><button data-import-retry="${p.id}">Retry next poll</button> <button class="link-button danger" data-import-dismiss="${p.id}">Dismiss</button></section>`).join('')}` : ''}<h3 class="section-title">Pending imports</h3><p class="muted">Accept posts for the index here. Release approval is managed separately.</p>${imports.map(c => importCard(c, allMods)).join('') || '<p>No pending imports.</p>'}<h3 class="section-title">Users</h3><div class="scroll"><table><thead><tr><th>Username</th><th>Role</th><th>Registered</th><th>Mods</th><th>Votes</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td class="date">${date(u.created_at)}</td><td>${u.mods}</td><td>${u.votes}</td><td>${u.id !== session.user.id ? `<button class="link-button danger" data-delete-user="${u.id}" data-name="${esc(u.username)}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div><h3 class="section-title">Mods</h3><div class="scroll"><table><thead><tr><th>Name</th><th>Author</th><th></th></tr></thead><tbody>${allMods.map(m => `<tr><td><a href="/mod/${m.id}" data-nav>${esc(m.name)}</a></td><td>${esc(usernames.get(m.user_id) || m.author)}</td><td><button class="link-button danger" data-delete-mod="${m.id}">Remove</button></td></tr>`).join('') || '<tr><td colspan="3">No mods.</td></tr>'}</tbody></table></div>`;
+  const listingChoices = [...allMods].sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id);
+  view.innerHTML = `<h2>Admin</h2>${importErrors.length ? `<h3 class="section-title">Import errors</h3>${importErrors.map(p => `<section class="panel"><p>${link(p.source.url, `Post ${p.id}`)} · ${esc(p.reason)}</p><button data-import-retry="${p.id}">Retry next poll</button> <button class="link-button danger" data-import-dismiss="${p.id}">Dismiss</button></section>`).join('')}` : ''}<h3 class="section-title">Pending imports</h3><p class="muted">Accept posts for the index here. Release approval is managed separately.</p>${imports.map(c => importCard(c, listingChoices)).join('') || '<p>No pending imports.</p>'}<h3 class="section-title">Users</h3><div class="scroll"><table><thead><tr><th>Username</th><th>Role</th><th>Registered</th><th>Mods</th><th>Votes</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td class="date">${date(u.created_at)}</td><td>${u.mods}</td><td>${u.votes}</td><td>${u.id !== session.user.id ? `<button class="link-button danger" data-delete-user="${u.id}" data-name="${esc(u.username)}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div><h3 class="section-title">Mods</h3><div class="scroll"><table><thead><tr><th>Name</th><th>Author</th><th></th></tr></thead><tbody>${allMods.map(m => `<tr><td><a href="/mod/${m.id}" data-nav>${esc(m.name)}</a></td><td>${esc(usernames.get(m.user_id) || m.author)}</td><td><button class="link-button danger" data-delete-mod="${m.id}">Remove</button></td></tr>`).join('') || '<tr><td colspan="3">No mods.</td></tr>'}</tbody></table></div>`;
+  wireImportFilters(listingChoices);
 }
 async function render() {
   if (disposeGallery) {disposeGallery(); disposeGallery = null;}
@@ -315,20 +357,25 @@ document.addEventListener('change', event => {
   current.innerHTML = existing ? `<a href="/mod/${Number(selected.value)}" target="_blank" rel="noopener noreferrer">View current listing</a> · Updated ${date(Number(selected.dataset.updated))}` : '';
 });
 document.addEventListener('click', async event => {
+  const page = event.target.closest('a[data-index-page]');
+  if (page && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) {
+    event.preventDefault();
+    const next = Number(page.dataset.indexPage);
+    if (next === indexPageNumber) return;
+    const pager = page.closest('[data-pagination]'), scrollY = window.scrollY;
+    indexPageNumber = next;
+    history.pushState({}, '', page.getAttribute('href'));
+    indexTable();
+    pager.querySelector('[aria-current="page"]').focus({preventScroll: true});
+    window.scrollTo(window.scrollX, scrollY);
+    return;
+  }
   const a = event.target.closest('a[data-nav]');
   if (a && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) {event.preventDefault(); navigate(a.getAttribute('href')); return;}
   const button = event.target.closest('button'); if (!button) return;
   try {
     if (button.id === 'logout') {await api('/api/logout', {method: 'POST'}); await refreshSession(); navigate('/');}
     if (button.dataset.sort) {sort = {key: button.dataset.sort, direction: sort.key === button.dataset.sort ? -sort.direction : (button.dataset.sort === 'name' ? 1 : -1)}; indexPageNumber = 1; indexTable();}
-    if (button.dataset.pageStep) {
-      const step = Number(button.dataset.pageStep);
-      indexPageNumber += step; indexTable();
-      const pager = document.querySelector('[data-pagination]');
-      const focus = pager.querySelector(`[data-page-step="${step}"]:not(:disabled)`) || pager.querySelector('button:not(:disabled)');
-      focus?.focus({preventScroll: true});
-      pager.scrollIntoView({block: 'start'});
-    }
     if (button.dataset.expandMod) {
       const id = Number(button.dataset.expandMod);
       if (expandedMods.has(id)) expandedMods.delete(id); else expandedMods.add(id);

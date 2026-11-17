@@ -119,8 +119,9 @@ choose their own admin/reviewer usernames in the wizard.
   Description sorts alphabetically by mod name. Collapsed rows have a fixed height; Show more expands long posts inline
   and Show less restores the compact row. The text filter includes the full post.
   The index shows 10 mods per page, after sorting and filtering the full catalog.
-  Opening a listing and returning keeps the page; changing the search or sort
-  starts at page one.
+  Numbered page links and First/Previous/Next/Last preserve search and sort in the
+  URL. Page changes keep the vertical scroll position where the page height allows.
+  Opening a listing and returning keeps the page; changing search or sort starts at page one.
 - Admins can edit/remove any mod and remove other users in the web UI. Removing
   a user cascades through their mods, votes, sessions, and tokens.
   Removing a reviewer clears their visible checks. An admin cannot delete their
@@ -188,6 +189,11 @@ are skipped on retry. If a model call fails, the existing description is retaine
 and the next run retries. Manual queue publication is summarized on the next poll
 (or via this command) when the target remains importer-owned and unmodified.
 
+The original post's attached image is always used, including memes and reaction
+pictures, and may be shared by several mods announced together. This is selected
+from saved source metadata even when an older model extraction omitted it.
+When there is no still-image attachment, an explicitly linked image can be used.
+
 Existing published announcements can have their images retained without model
 calls. After upgrading, run:
 
@@ -197,6 +203,9 @@ DATA_DIR=/path/to/live ./he-mod-index ingest images --owner 123
 
 This uses the same public-IP-pinned image pipeline and limits. It keeps the index
 cover unchanged and reuses it only when its bytes match the fetched source image.
+Use `--mod 73` to limit the operation to one listing. Add `--cover-missing` to fill
+an empty cover from its current accepted source post, including an image already
+in its gallery. Existing covers, manual edits and explicit removals stay protected.
 Successful imports are skipped on retry; explicit removals stay removed. Listings
 with intervening manual edits are skipped to protect older image removals without
 gallery records. Known video links are skipped. New announcements retain their image during publication;
@@ -229,7 +238,9 @@ Clear candidates publish as unreviewed listings owned by the configured admin.
 Automatic updates require a matching repository/name, the same download set, or
 an explicit prior announcement, and a newer source. Name-only matches, existing
 user-owned listings, and manually edited imports wait in **Admin → Pending
-imports**. Inspect the post date, source, description, and download links, then:
+imports**. The **Find listing** field filters the alphabetical picker by any part
+of a name, version or `#ID`, without changing an existing selection. Inspect the
+post date, source, description, and download links, then:
 
 - **Create listing** publishes a separate mod.
 - **Update listing** publishes the post as the selected mod's current release,

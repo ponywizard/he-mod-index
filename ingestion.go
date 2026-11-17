@@ -18,9 +18,9 @@ import (
 )
 
 type ingestOptions struct {
-	evalExtract, dryRun                                                 bool
+	evalExtract, dryRun, coverMissing                                   bool
 	command, model, extractModel, envFile, start, sources, labels, from string
-	owner                                                               int64
+	owner, imageMod                                                     int64
 	budget                                                              float64
 	collectOnly                                                         bool
 }
@@ -34,6 +34,8 @@ func parseIngest(args []string, out io.Writer) (ingestOptions, error) {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.BoolVar(&o.evalExtract, "extract", false, "evaluate extraction instead of classification")
+	fs.Int64Var(&o.imageMod, "mod", 0, "limit images backfill to one listing")
+	fs.BoolVar(&o.coverMissing, "cover-missing", false, "images: fill an empty cover from its current source post")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "preview prune decisions without changing the queue")
 	fs.StringVar(&o.extractModel, "extract-model", "gpt-5.4-mini", "model for extraction and history-based descriptions")
 	fs.StringVar(&o.model, "model", "gpt-6-luna", "OpenAI model with verified price")
@@ -61,6 +63,9 @@ func parseIngest(args []string, out io.Writer) (ingestOptions, error) {
 	}
 	if fs.NArg() != 0 {
 		return o, errors.New("unexpected ingest arguments")
+	}
+	if o.imageMod < 0 || (o.imageMod > 0 || o.coverMissing) && o.command != "images" {
+		return o, errors.New("--mod and --cover-missing require images; mod must be nonnegative")
 	}
 	if o.budget <= 0 || o.budget > 1000 || o.owner < 0 {
 		return o, errors.New("budget must be >0 and <=1000; owner must be nonnegative")
@@ -376,7 +381,7 @@ func (a *app) runIngest(ctx context.Context, o ingestOptions, out io.Writer) err
 		return json.NewEncoder(out).Encode(decisions)
 	}
 	if o.command == "images" {
-		if err = a.backfillGallery(ctx, o.owner); err != nil {
+		if err = a.backfillGallerySelection(ctx, o.owner, o.imageMod, o.coverMissing); err != nil {
 			return err
 		}
 		return a.ingestionStatus(out)

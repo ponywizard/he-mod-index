@@ -78,6 +78,18 @@ func isVideoURL(raw string) bool {
 	return false
 }
 
+// The attachment is source evidence; its inclusion never depends on a model's
+// opinion of its relevance. Older immutable extractions can use this fallback too.
+func sourceImageURL(entry extractedMod, source threadPost) string {
+	if source.Image != "" && !isVideoURL(source.Image) {
+		return source.Image
+	}
+	if !isVideoURL(entry.ImageURL) {
+		return entry.ImageURL
+	}
+	return ""
+}
+
 func (a *app) importCandidateImage(ctx context.Context, c importCandidate, modID, owner int64, actor *identity) error {
 	return a.retainCandidateImage(ctx, c, modID, owner, actor, true)
 }
@@ -85,14 +97,11 @@ func (a *app) importCandidateImage(ctx context.Context, c importCandidate, modID
 // Gallery-only backfills do not change the index cover, descriptions, or dates.
 // Publication stores the same local pair as both cover and historical image.
 func (a *app) retainCandidateImage(ctx context.Context, c importCandidate, modID, owner int64, actor *identity, cover bool) error {
-	if c.Entry.ImageURL == "" {
+	imageURL := sourceImageURL(c.Entry, c.Source)
+	if imageURL == "" {
 		return nil
 	}
-	// Extraction can select a demonstration clip; the image gallery accepts
-	// still images only. Avoid downloading known videos just to reject them.
-	if isVideoURL(c.Entry.ImageURL) {
-		return nil
-	}
+
 	var exists bool
 	if err := a.db.QueryRow("SELECT EXISTS(SELECT 1 FROM mod_images WHERE candidate_id=?)", c.ID).Scan(&exists); err != nil {
 		return err
@@ -127,7 +136,7 @@ func (a *app) retainCandidateImage(ctx context.Context, c importCandidate, modID
 		log.Printf("mod %d: skipping historical image after a manual edit", modID)
 		return nil
 	}
-	img, err := a.remoteImage(ctx, c.Entry.ImageURL)
+	img, err := a.remoteImage(ctx, imageURL)
 	if err != nil {
 		return err
 	}
@@ -175,16 +184,21 @@ func (a *app) retainCandidateImage(ctx context.Context, c importCandidate, modID
 	if fingerprint(current) != fingerprint(old) {
 		return problem(409, "Listing changed during image import.")
 	}
-	// The immutable published candidate is authoritative, including its image URL.
-	var payload string
-	if err = tx.QueryRow("SELECT payload FROM ingest_candidates WHERE id=? AND mod_id=? AND state='published' AND post_id=?", c.ID, modID, c.PostID).Scan(&payload); err != nil {
+	// Both the immutable accepted entry and its saved original attachment are
+	// authoritative. Recheck them after the remote fetch before saving files.
+	var payload, sourceJSON string
+	if err = tx.QueryRow("SELECT c.payload,p.payload FROM ingest_candidates c JOIN ingest_posts p ON p.id=c.post_id WHERE c.id=? AND c.mod_id=? AND c.state='published' AND c.post_id=?", c.ID, modID, c.PostID).Scan(&payload, &sourceJSON); err != nil {
 		return err
 	}
 	var accepted extractedMod
 	if err = json.Unmarshal([]byte(payload), &accepted); err != nil {
 		return err
 	}
-	if accepted.ImageURL != c.Entry.ImageURL {
+	var source threadPost
+	if err = json.Unmarshal([]byte(sourceJSON), &source); err != nil {
+		return err
+	}
+	if sourceImageURL(accepted, source) != imageURL {
 		return problem(409, "Source changed during image import.")
 	}
 	var pid int64
@@ -235,7 +249,10 @@ func (a *app) removeUnusedImage(path string, id int64) {
 }
 
 func (a *app) backfillGallery(ctx context.Context, owner int64) error {
-	rows, err := a.db.Query(`SELECT c.id,c.mod_id,m.user_id FROM ingest_candidates c JOIN mods m ON m.id=c.mod_id JOIN users u ON u.id=m.user_id LEFT JOIN mod_images g ON g.candidate_id=c.id WHERE c.state='published' AND u.role='admin' AND (?=0 OR m.user_id=?) AND g.candidate_id IS NULL ORDER BY c.post_id,c.ordinal`, owner, owner)
+	return a.backfillGallerySelection(ctx, owner, 0, false)
+}
+func (a *app) backfillGallerySelection(ctx context.Context, owner, modID int64, coverMissing bool) error {
+	rows, err := a.db.Query(`SELECT c.id,c.mod_id,m.user_id FROM ingest_candidates c JOIN mods m ON m.id=c.mod_id JOIN users u ON u.id=m.user_id LEFT JOIN mod_images g ON g.candidate_id=c.id WHERE c.state='published' AND u.role='admin' AND (?=0 OR m.user_id=?) AND (?=0 OR m.id=?) AND (g.candidate_id IS NULL OR (? AND g.image_url<>'' AND m.image_url='' AND EXISTS(SELECT 1 FROM mod_sources s WHERE s.mod_id=m.id AND s.post_id=c.post_id))) ORDER BY c.post_id,c.ordinal`, owner, owner, modID, modID, coverMissing)
 	if err != nil {
 		return err
 	}
@@ -263,7 +280,10 @@ func (a *app) backfillGallery(ctx context.Context, owner int64) error {
 		if err != nil {
 			return err
 		}
-		if err = a.retainCandidateImage(ctx, c, item.mod, item.owner, nil, false); err != nil {
+		if err = a.retainCandidateImage(ctx, c, item.mod, item.owner, nil, false); err == nil && coverMissing {
+			err = a.fillMissingGalleryCover(ctx, c.ID, item.mod, item.owner)
+		}
+		if err != nil {
 			failed++
 			log.Printf("mod %d image from post %d: %v", item.mod, c.PostID, err)
 		}
@@ -272,6 +292,68 @@ func (a *app) backfillGallery(ctx context.Context, owner int64) error {
 		return fmt.Errorf("%d source images could not be retained; successful images are saved, rerun ingest images to retry", failed)
 	}
 	return nil
+}
+
+// Explicit maintenance may fill a missing cover from the current accepted post.
+// Existing covers, manual edits and gallery-removal tombstones remain protected.
+func (a *app) fillMissingGalleryCover(ctx context.Context, candidateID, modID, owner int64) error {
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	current, err := scanMod(tx.QueryRowContext(ctx, modSelect+" WHERE m.id=?", 0, modID))
+	if err != nil {
+		return err
+	}
+	if current.ImageURL != "" || current.ThumbnailURL != "" {
+		return nil
+	}
+	var sourceFingerprint, role string
+	err = tx.QueryRowContext(ctx, "SELECT s.fingerprint,u.role FROM mod_sources s JOIN users u ON u.id=? WHERE s.mod_id=?", owner, modID).Scan(&sourceFingerprint, &role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if role != "admin" || current.UserID != owner {
+		return problem(403, "Importer owner no longer authorized.")
+	}
+	if sourceFingerprint != fingerprint(current) {
+		return nil
+	}
+	var original, thumbnail string
+	err = tx.QueryRowContext(ctx, `SELECT g.image_url,g.thumbnail_url FROM mod_images g JOIN ingest_candidates c ON c.id=g.candidate_id AND c.mod_id=g.mod_id JOIN mod_sources s ON s.mod_id=g.mod_id AND s.post_id=c.post_id WHERE g.candidate_id=? AND g.mod_id=? AND c.state='published' AND g.image_url<>''`, candidateID, modID).Scan(&original, &thumbnail)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !validLocalImage(original, modID) || thumbnail != thumbnailURL(original) {
+		return errors.New("invalid gallery image")
+	}
+	data, err := os.ReadFile(filepath.Join(a.cfg.DataDir, strings.TrimPrefix(original, "/")))
+	if err != nil {
+		return err
+	}
+	im, err := decodeImage(data)
+	if err != nil {
+		return err
+	}
+	crop, err := normalizeCrop(im, nil)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE mods SET image_url=?,thumbnail_url=?,crop_x=?,crop_y=?,crop_size=? WHERE id=?", original, thumbnail, crop.X, crop.Y, crop.Size, modID); err != nil {
+		return err
+	}
+	current.ImageURL, current.ThumbnailURL, current.ImageCrop = original, thumbnail, crop
+	if _, err = tx.ExecContext(ctx, "UPDATE mod_sources SET fingerprint=? WHERE mod_id=?", fingerprint(current), modID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Collect paths before the FK cascade removes historical image records.

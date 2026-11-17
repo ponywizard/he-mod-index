@@ -161,7 +161,7 @@ func TestExtractorKeepsOwnReleaseAndAttachment(t *testing.T) {
 	e.Name = "Better Mods"
 	e.Version = "1.2"
 	e.RepositoryURL = ""
-	e.ImageURL = p.Image
+	e.ImageURL = "" // The model may omit an attachment; source metadata still wins.
 	e.Downloads = []download{{Filename: "new.pck", URL: p.Links[0]}, {Filename: "old.pck", URL: old.Links[0]}}
 	payload, _ := json.Marshal(map[string]any{"entries": []extractedMod{e}})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
