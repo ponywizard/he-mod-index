@@ -66,6 +66,18 @@ func (a *app) getModImages(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, 200, list)
 }
 
+func isVideoURL(raw string) bool {
+	source, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(source.Path)) {
+	case ".mp4", ".webm", ".mov", ".avi", ".mkv":
+		return true
+	}
+	return false
+}
+
 func (a *app) importCandidateImage(ctx context.Context, c importCandidate, modID, owner int64, actor *identity) error {
 	return a.retainCandidateImage(ctx, c, modID, owner, actor, true)
 }
@@ -78,11 +90,8 @@ func (a *app) retainCandidateImage(ctx context.Context, c importCandidate, modID
 	}
 	// Extraction can select a demonstration clip; the image gallery accepts
 	// still images only. Avoid downloading known videos just to reject them.
-	if source, err := url.Parse(c.Entry.ImageURL); err == nil {
-		switch strings.ToLower(filepath.Ext(source.Path)) {
-		case ".mp4", ".webm", ".mov", ".avi", ".mkv":
-			return nil
-		}
+	if isVideoURL(c.Entry.ImageURL) {
+		return nil
 	}
 	var exists bool
 	if err := a.db.QueryRow("SELECT EXISTS(SELECT 1 FROM mod_images WHERE candidate_id=?)", c.ID).Scan(&exists); err != nil {

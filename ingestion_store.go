@@ -320,36 +320,28 @@ func matchImport(tx *sql.Tx, c importCandidate, owner int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	sourcePosts := map[int64]int64{}
-	sources, err := tx.Query("SELECT mod_id,post_id FROM mod_sources")
-	if err != nil {
-		return 0, err
-	}
-	for sources.Next() {
-		var id, post int64
-		if err = sources.Scan(&id, &post); err != nil {
-			sources.Close()
+	// A quoted announcement can contain several mods. Its post ID alone does
+	// not identify which of those releases is being updated, even if only one
+	// entry has been published so far.
+	var previousEntryCount int
+	if c.Entry.PreviousPostID > 0 {
+		if err = tx.QueryRow("SELECT COUNT(*) FROM ingest_candidates WHERE post_id=?", c.Entry.PreviousPostID).Scan(&previousEntryCount); err != nil {
 			return 0, err
 		}
-		sourcePosts[id] = post
 	}
-	err = sources.Err()
-	sources.Close()
-	if err != nil {
-		return 0, err
-	}
+	predecessors := map[int64]bool{}
 	// Accepted history remembers names that an operator has reconciled. An alias
 	// can prevent a duplicate, but does not bypass provenance or manual-edit checks.
 	aliases := map[int64]map[string]bool{}
-	history, err := tx.Query("SELECT mod_id,payload FROM ingest_candidates WHERE state='published' AND mod_id IS NOT NULL")
+	history, err := tx.Query("SELECT mod_id,post_id,payload FROM ingest_candidates WHERE state='published' AND mod_id IS NOT NULL")
 	if err != nil {
 		return 0, err
 	}
 	for history.Next() {
-		var id int64
+		var id, post int64
 		var raw string
 		var entry extractedMod
-		if err = history.Scan(&id, &raw); err != nil {
+		if err = history.Scan(&id, &post, &raw); err != nil {
 			history.Close()
 			return 0, err
 		}
@@ -361,6 +353,9 @@ func matchImport(tx *sql.Tx, c importCandidate, owner int64) (int64, error) {
 			aliases[id] = map[string]bool{}
 		}
 		aliases[id][normalizedName(entry.Name)] = true
+		if post == c.Entry.PreviousPostID {
+			predecessors[id] = true
+		}
 	}
 	err = history.Err()
 	history.Close()
@@ -368,6 +363,7 @@ func matchImport(tx *sql.Tx, c importCandidate, owner int64) (int64, error) {
 		return 0, err
 	}
 	possible := []mod{}
+	previousMatches := map[int64]bool{}
 	repos := entryRepositories(c.Entry)
 	for _, m := range list {
 		sameName := normalizedName(m.Name) == normalizedName(c.Entry.Name)
@@ -407,11 +403,17 @@ func matchImport(tx *sql.Tx, c importCandidate, owner int64) (int64, error) {
 				possibleAlias = true
 			}
 		}
-		if sameName || aliases[m.ID][normalizedName(c.Entry.Name)] || linked || possibleAlias || c.Entry.PreviousPostID > 0 && sourcePosts[m.ID] == c.Entry.PreviousPostID {
+		historicalName := aliases[m.ID][normalizedName(c.Entry.Name)]
+		previousMatch := predecessors[m.ID] && (previousEntryCount == 1 || sameName || historicalName || linked)
+		previousMatches[m.ID] = previousMatch
+		if sameName || historicalName || linked || possibleAlias || previousMatch {
 			possible = append(possible, m)
 		}
 	}
 	if len(possible) == 0 {
+		if previousEntryCount > 1 {
+			return 0, problem(409, "Earlier post contains multiple mods; confirm which listing this updates.")
+		}
 		return 0, nil
 	}
 	if len(possible) > 1 {
@@ -421,11 +423,7 @@ func matchImport(tx *sql.Tx, c importCandidate, owner int64) (int64, error) {
 	if m.UserID != owner || m.SourceURL == "" {
 		return 0, problem(409, "Existing listing requires an explicit merge.")
 	}
-	var previous int64
-	if err = tx.QueryRow("SELECT post_id FROM mod_sources WHERE mod_id=?", m.ID).Scan(&previous); err != nil {
-		return 0, err
-	}
-	matched := c.Entry.PreviousPostID == previous
+	matched := previousMatches[m.ID]
 	if normalizedName(m.Name) == normalizedName(c.Entry.Name) {
 		for key := range entryRepositories(extractedMod{RepositoryURL: m.RepositoryURL, Downloads: m.Downloads}) {
 			if repos[key] {

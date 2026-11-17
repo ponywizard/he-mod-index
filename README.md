@@ -246,6 +246,12 @@ Polling dismisses pending recommendations that borrow their download from quoted
 posts, and repeated links under the same name without a new version. It preserves
 published history and operator dismissals. To preview or apply this cleanup without
 model calls, run `ingest prune --dry-run` or `ingest prune` with the usual `DATA_DIR`.
+Posts announcing several mods produce separate candidates with independent versions,
+downloads, histories and review decisions. Quoting a shared earlier post identifies
+an update only when the mod name, accepted alias or download disambiguates it.
+A repeated download in one entry does not discard another mod's new release.
+Known video attachments are not imported as screenshots.
+
 Accepted historical names also prevent renamed mods from being imported as duplicates;
 ambiguous identity and intervening manual edits still require review.
 
