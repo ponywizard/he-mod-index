@@ -14,7 +14,8 @@ go build -o he-mod-index .
 ./he-mod-index
 ```
 
-Open <http://localhost:8080>. Data is created in `./data/`. The index starts empty.
+Open <http://localhost:8080>. Data is created in `./data/`. The index starts empty. Public registration/sign-in links are hidden; use
+`/login` directly for account access and `/admin` for moderation.
 
 `admin` opens the account wizard. Choose your own username, or press Enter to
 accept `admin`, then set the role and password. Password entry is hidden.
@@ -36,8 +37,8 @@ Ctrl+C or EOF cancels without saving the wizard's changes.
 
 `admin` defaults new accounts to the admin role. The general `user` wizard asks
 for a username and defaults new accounts to user; `devanon` defaults to reviewer.
-To set up devanon, run `user`, enter `devanon`, and accept the reviewer role.
-Deliver their initial password privately; they can change it in Account.
+Use a separate reviewer account for human release checks; admin sessions manage
+listings and imports. Deliver account credentials privately.
 
 The wizard prints the database path. Run it as the service user with the same
 `DATA_DIR` as the server. Password or role changes revoke that account's sessions
@@ -61,7 +62,9 @@ choose their own admin/reviewer usernames in the wizard.
 
 ## Behavior
 
-- Registration requires only a username and password. The first successful
+- Public navigation omits registration, sign-in, and anonymous submission links.
+  Direct `/login`, `/register`, and the existing account APIs remain available.
+  Anonymous vote controls are disabled. Registration requires only a username and password. The first successful
   registration starts a persistent IP cooldown (one hour by default). Login and
   registration attempts are also rate limited. There is no email recovery;
   the operator can reset an account with the local wizard above.
@@ -111,7 +114,108 @@ choose their own admin/reviewer usernames in the wizard.
   own account through the UI.
 - Account → Upload tokens creates one-time-visible, revocable tokens with a
   one-year expiry. They manage only the owner's mod content and images, even
-  when the owner is an admin. `/AGENTS.md` serves author-facing API instructions.
+  when the owner is an admin. `/AGENTS.md` serves read-only API instructions.
+
+## Thread imports and RSS
+
+`/feed.xml` serves RSS 2.0 for the 100 latest updated listings. Item GUIDs include
+release revision; descriptive edits keep the same GUID. `/api/site` exposes the
+current thread URL, also linked in the footer. Imported details link to their
+source announcement on 4chan or Desuarchive. Imports never grant release checks.
+
+Back up the live data before upgrading. Start archive hydration in a separate
+data directory (no account is needed to stage candidates):
+
+```sh
+DATA_DIR=/path/to/staging ./he-mod-index ingest hydrate --env-file .env --budget 5
+DATA_DIR=/path/to/staging ./he-mod-index ingest status
+```
+
+Hydration searches Desuarchive for `Home: Equestria` subjects from 2026-08-07,
+paginates the results, then fetches threads in order. `--start YYYY-MM-DD` changes
+the date. `--collect-only` collects without model calls. `--sources DIR` accepts
+saved archive JSON files named with their numeric thread ID. `ingest process`
+resumes classification/extraction without downloading sources again.
+
+The defaults are GPT-6 Luna for classification and GPT-5.4 mini for extraction,
+using the Responses API with structured outputs,
+no tools, and `store: false`. Both stages accept only supplied post IDs and URLs;
+Go validates the extracted fields again. The extractor can return multiple mods
+per post, consult quoted replies, and select an explicitly referenced screenshot. Quoted download links, work-in-progress
+posts, and uncertain discovery results are held for manual resolution. Unrelated
+context-only releases and known base-game/index releases are excluded in code. Images use the
+existing local original/thumbnail pipeline; no synthetic screenshots are made.
+When a version is unstated it reads `Unversioned`. Posted repository/release-page
+links are retained when no direct download is supplied.
+
+The budget is cumulative across restarts and model evaluations. Requests reserve
+an upper estimate before sending; failed requests retain that reservation, and
+successful usage replaces it with the calculated cost. Price constants in
+`ingestion_model.go` are standard USD/token rates verified on 2026-11-17; review
+them when changing models or billing settings. This is an application spending
+limit, not a provider billing guarantee. No model calls run without a key.
+
+Transfer completed staging work into an existing installation without replacing
+its accounts, listings, votes, or review history:
+
+```sh
+DATA_DIR=/path/to/live ./he-mod-index ingest merge --from /path/to/staging/index.db --owner 123
+```
+
+Replace `123` with the existing admin's account ID (visible in `/api/session`
+while signed in). Run as the service user with its real data directory. Omit
+`--owner` to merge candidates without publishing. Merge uses a read-only source
+connection, validates candidates, carries over API spending, and never copies
+accounts or mod IDs. Repeating the same snapshot is idempotent. Keep the staging
+SQLite WAL/SHM files with it while copying, or stop its processes and use an online
+SQLite backup. Do not replace the live database with the staging database.
+
+Clear candidates publish as unreviewed listings owned by the configured admin.
+Automatic updates require a matching repository/name, the same download set, or
+an explicit prior announcement, and a newer source. Name-only matches, existing
+user-owned listings, and manually edited imports wait in **Admin → Pending
+imports**. Choose a new listing or an existing target to merge, or dismiss the
+candidate. Manual merge preserves the target's ownership; listings owned by a
+different account continue to require manual merging. Inspect the source and
+description before publishing. Model refusals/invalid extraction appear in
+**Import errors**, where Retry queues another attempt on the next run. API or
+network failures leave unprocessed work durable for a later run. Image failures
+keep the listing and its previous/default image; use Edit to retry the image.
+
+For ongoing operation, set these in the service environment and restart:
+
+```text
+OPENAI_KEY=your-key
+INGEST_OWNER_ID=123
+INGEST_POLL_INTERVAL=10m
+INGEST_MODEL=gpt-6-luna
+INGEST_EXTRACT_MODEL=gpt-5.4-mini
+INGEST_BUDGET_USD=5
+```
+
+The poller watches matching `/mlp/` catalog subjects, persists `current_thread`,
+keeps watching predecessor threads, and collects their final archive posts.
+On rollover it also searches for intermediate archived threads missed during
+downtime. Requests are at least one second apart and use `If-Modified-Since`.
+A data-directory lock prevents overlapping CLI and background ingestion.
+`ingest poll --owner 123` runs one cycle manually. The current-thread link still
+updates if later model work hits its budget. Raise the cumulative budget
+explicitly when needed; it never resets each polling cycle.
+
+For repeatable classifier evaluations, collect sources first, then run:
+
+```sh
+DATA_DIR=/path/to/staging ./he-mod-index ingest eval --labels /path/to/labels.json --env-file .env --model gpt-6-luna --budget 5
+```
+
+Labels are a JSON array of `{"post_id": 43715474, "release": true}` objects.
+Evaluation reports true positives, false positives, misses, and their IDs, and
+uses the same budget. Add `--extract` to evaluate extraction; `--model` selects
+the evaluation model. Normal runs use `--extract-model` for the second stage.
+Keep source data, labels, and generated output out of Git.
+A small evaluation sample does not establish general reliability; review held
+imports and spot-check excluded posts as the threads change. Source-code and
+malware auditing, and an “Agent Reviewed” badge, are separate future work.
 
 ## Configuration
 
@@ -123,9 +227,16 @@ choose their own admin/reviewer usernames in the wizard.
 | `REGISTRATION_COOLDOWN` | `1h` | Successful registrations per IP; Go duration, at least 1s |
 | `TRUSTED_PROXIES` | empty | Comma-separated proxy CIDRs trusted to supply `X-Forwarded-For` |
 | `ACCOUNT_PASSWORD` | empty | Password for scripted account commands; terminal users are prompted |
+| `OPENAI_KEY` / `OPENAI_API_KEY` | empty | Server-side OpenAI key for ingestion |
+| `INGEST_POLL_INTERVAL` | `0s` | Disabled by default; use `10m` to poll (minimum `1m`) |
+| `INGEST_OWNER_ID` | empty | Existing admin account ID that owns automatic imports |
+| `INGEST_MODEL` | `gpt-6-luna` | Classification model |
+| `INGEST_EXTRACT_MODEL` | `gpt-5.4-mini` | Descriptions, links, and screenshot selection |
+| `INGEST_BUDGET_USD` | `5` | Cumulative API cap for this database, including hydration |
 
-Set environment variables in your service supervisor. The app does not load
-`.env` files automatically. IPs are stored only as keyed hashes; IPv6 addresses
+Set environment variables in your service supervisor. The server does not load
+`.env` files automatically. Ingestion CLI commands accept `--env-file .env`,
+which reads only the OpenAI key and never evaluates shell code. IPs are stored only as keyed hashes; IPv6 addresses
 share a /64 allowance. The signing/hash key is generated once and stored in the
 database. Keep it stable by preserving the database. Sessions and API tokens are
 stored as hashes; passwords use salted PBKDF2-HMAC-SHA256 with 600,000 iterations.
@@ -162,7 +273,7 @@ inbound ports 80/443 for Caddy.
    sudo systemctl reload caddy
    ```
 
-Open `https://mods.example.org` and sign in with the admin account you created.
+Open `https://mods.example.org/login` and sign in with the admin account you created.
 The installer creates a non-login `he-mod-index` service user, copies the binary
 to `/srv/he-mod-index/he-mod-index`, installs
 [he-mod-index.service](deploy/he-mod-index.service), and enables/starts it.
@@ -261,11 +372,13 @@ multipart downloads, thumbnail crops, remote-image validation, migrations,
 account wizard validation/cancellation, and deletion cascades. Tests never write
 to the running site's data.
 
-Schema version 5 is recorded in `PRAGMA user_version`. A transaction migrates
+Schema version 6 is recorded in `PRAGMA user_version`. A transaction migrates
 older versions automatically, preserving listings, votes, and release checks.
 Version 4 removes the retired Hot metric's activity table and index.
 Version 5 preserves existing IDs and prevents reuse of subsequently deleted
 account, mod, and token IDs, so stale requests cannot target replacement records.
+Version 6 adds durable source posts, import candidates, mod provenance, API usage,
+and the current-thread setting. Existing accounts and listings are unchanged.
 Existing accounts keep their username display until they enable Anonymous.
 Existing single downloads become one-item arrays with a filename inferred from the URL.
 Existing local screenshots get centered thumbnails on startup; authors can

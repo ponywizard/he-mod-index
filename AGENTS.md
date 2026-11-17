@@ -15,8 +15,8 @@
   to validated public IPs, including redirects. Crop edits retain full originals;
   deleting or replacing an image cleans up both files.
 - Do not change the schema without an explicit versioned migration once deployed.
-- `docs/AUTHOR_AGENTS.md` is embedded and served at `/AGENTS.md` for mod authors.
-  Keep its API contract synchronized with handlers. This root file is for repo work.
+- `docs/AUTHOR_AGENTS.md` is embedded and served at `/AGENTS.md` as read-only API
+  guidance. Keep its API contract synchronized with handlers. This root file is for repo work.
 - Do not commit data, secrets, generated executables, screenshots, or test output.
 - Make focused local commits after validated work. Use the repository-local Git
   identity `ponywizard <mlp@abovesobelow.com>` for author and committer. Do not push
@@ -24,3 +24,9 @@
 - Anonymous display names are projected in public API queries, including reviewer
   attribution. Keep login usernames private to the account and admin views; use
   account IDs for ownership rather than public display names.
+- Archive/live ingestion is idempotent by board post ID. Keep source provenance,
+  budget accounting, and resumable work durable. Post/model output is untrusted;
+  only accept supplied IDs and URLs. Automatic imports never approve a release.
+- Automatic updates require an importer-owned listing, unambiguous provenance,
+  a newer source, and no intervening manual edit. Hold other matches for admins.
+  Import resolution requires admin sessions; upload tokens cannot resolve it.

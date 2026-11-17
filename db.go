@@ -37,7 +37,7 @@ func openDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 func migrateDB(db *sql.DB) (err error) {
 	// Table rebuilds require foreign_keys to be disabled before the transaction.
@@ -142,6 +142,12 @@ func migrateDB(db *sql.DB) (err error) {
 		if _, err = tx.Exec(schemaV5); err != nil {
 			return err
 		}
+		version = 5
+	}
+	if version == 5 {
+		if _, err = tx.Exec(schemaV6); err != nil {
+			return err
+		}
 	}
 	rows, err := tx.Query("PRAGMA foreign_key_check")
 	if err != nil {
@@ -158,6 +164,34 @@ func migrateDB(db *sql.DB) (err error) {
 	}
 	return tx.Commit()
 }
+
+// Source records are independent of accounts. Candidate publication and mod
+// provenance are committed together; deletion cannot resurrect an old import.
+const schemaV6 = `
+CREATE TABLE IF NOT EXISTS ingest_posts (
+ id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, posted_at INTEGER NOT NULL,
+ payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending'
+ CHECK(state IN ('pending','other','candidate','done')), reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS ingest_pending ON ingest_posts(state,id);
+CREATE TABLE IF NOT EXISTS ingest_candidates (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL REFERENCES ingest_posts(id) ON DELETE CASCADE,
+ ordinal INTEGER NOT NULL, payload TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+ state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','published','rejected')),
+ mod_id INTEGER REFERENCES mods(id) ON DELETE SET NULL, UNIQUE(post_id,ordinal)
+);
+CREATE TABLE IF NOT EXISTS mod_sources (
+ mod_id INTEGER PRIMARY KEY REFERENCES mods(id) ON DELETE CASCADE,
+ post_id INTEGER NOT NULL REFERENCES ingest_posts(id), author TEXT NOT NULL,
+ source_url TEXT NOT NULL, posted_at INTEGER NOT NULL, fingerprint TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ingest_usage (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, model TEXT NOT NULL, stage TEXT NOT NULL,
+ reserved_micros INTEGER NOT NULL, actual_micros INTEGER, created_at INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO settings(key,value) VALUES('current_thread','43715264');
+PRAGMA user_version=6;
+`
 
 // AUTOINCREMENT retains the highest committed ID even after deletion. Preserve
 // existing IDs and references; never rename the old tables before rebuilding.

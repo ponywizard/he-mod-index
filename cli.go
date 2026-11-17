@@ -22,6 +22,7 @@ type userOptions struct {
 
 const cliUsage = `Usage:
   he-mod-index                         Start the server
+  he-mod-index ingest --help           Archive import and thread polling
   he-mod-index admin                   Admin account wizard
   he-mod-index user                    Account wizard
   he-mod-index user --name NAME --role ROLE

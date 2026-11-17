@@ -109,6 +109,7 @@ func (a *app) routes() http.Handler {
 	m.HandleFunc("POST /api/tokens", a.handle(a.createToken))
 	m.HandleFunc("DELETE /api/tokens/{id}", a.handle(a.deleteToken))
 	m.HandleFunc("GET /api/mods", a.handle(a.listMods))
+	m.HandleFunc("GET /api/site", a.handle(a.publicSite))
 	m.HandleFunc("GET /feed.xml", a.handle(a.feed))
 	m.HandleFunc("GET /api/mods/{id}", a.handle(a.getMod))
 	m.HandleFunc("POST /api/mods", a.handle(a.createMod))
@@ -120,6 +121,10 @@ func (a *app) routes() http.Handler {
 	m.HandleFunc("POST /api/mods/{id}/image/crop", a.handle(a.recropImage))
 	m.HandleFunc("POST /api/images/preview", a.handle(a.previewImage))
 	m.HandleFunc("GET /api/admin/users", a.handle(a.listUsers))
+	m.HandleFunc("GET /api/admin/import-errors", a.handle(a.listImportErrors))
+	m.HandleFunc("POST /api/admin/import-errors/{id}", a.handle(a.retryImportPost))
+	m.HandleFunc("GET /api/admin/imports", a.handle(a.listCandidates))
+	m.HandleFunc("POST /api/admin/imports/{id}", a.handle(a.resolveCandidate))
 	m.HandleFunc("DELETE /api/admin/users/{id}", a.handle(a.deleteUser))
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := a.db.PingContext(r.Context()); err != nil {

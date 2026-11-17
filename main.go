@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -24,6 +25,8 @@ type config struct {
 	Addr, PublicURL, DataDir string
 	RegistrationCooldown     time.Duration
 	TrustedProxies           []netip.Prefix
+	IngestInterval           time.Duration
+	IngestOptions            ingestOptions
 }
 
 func env(key, fallback string) string {
@@ -54,7 +57,23 @@ func loadConfig() (config, error) {
 		c.TrustedProxies = append(c.TrustedProxies, p)
 	}
 	c.DataDir, err = filepath.Abs(c.DataDir)
-	return c, err
+	if err != nil {
+		return c, err
+	}
+	c.IngestInterval, err = time.ParseDuration(env("INGEST_POLL_INTERVAL", "0s"))
+	if err != nil || c.IngestInterval < 0 || c.IngestInterval > 0 && c.IngestInterval < time.Minute {
+		return c, errors.New("INGEST_POLL_INTERVAL must be 0s (disabled) or at least 1m")
+	}
+	if c.IngestInterval > 0 {
+		c.IngestOptions, err = parseIngest([]string{"poll", "--owner", env("INGEST_OWNER_ID", "0"), "--model", env("INGEST_MODEL", "gpt-6-luna"), "--extract-model", env("INGEST_EXTRACT_MODEL", "gpt-5.4-mini"), "--budget", env("INGEST_BUDGET_USD", "5")}, io.Discard)
+		if err != nil {
+			return c, err
+		}
+		if c.IngestOptions.owner == 0 {
+			return c, errors.New("polling requires INGEST_OWNER_ID of an existing admin")
+		}
+	}
+	return c, nil
 }
 
 func main() {
@@ -64,6 +83,31 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "ingest" {
+		options, err := parseIngest(os.Args[2:], os.Stdout)
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		cfg, err := loadConfig()
+		if err != nil {
+			return err
+		}
+		db, err := openDB(filepath.Join(cfg.DataDir, "index.db"))
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		a, err := newApp(db, cfg)
+		if err != nil {
+			return err
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return a.runIngest(ctx, options, os.Stdout)
+	}
 	command, err := parseCLI(os.Args[1:], os.Stdout)
 	if errors.Is(err, flag.ErrHelp) {
 		return nil
@@ -97,6 +141,9 @@ func run() error {
 		_ = srv.Shutdown(shutdown)
 	}()
 	go a.cleanup(ctx)
+	workerDone := make(chan struct{})
+	go func() { defer close(workerDone); a.pollWorker(ctx) }()
+	defer func() { stop(); <-workerDone }()
 	log.Printf("Home: Equestria mods: %s (listening on %s)", cfg.PublicURL, cfg.Addr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err

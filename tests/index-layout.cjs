@@ -47,10 +47,14 @@ const mods = [
   {id: 2, name: 'A mod with a deliberately long name that wraps beyond the first line', author: 'Anonymous', short_description: ('A longer subject with useful details ').repeat(6), description: 'A short body.', thumbnail_url: '', rating: -2},
   {id: 3, name: 'Simple mod', author: 'mod_author', short_description: 'A short subject', description: 'A short description that fits.', thumbnail_url: '/uploads/test.jpg', rating: 0},
   {id: 4, name: 'No image', author: 'Anonymous', short_description: 'No long description', description: '', thumbnail_url: '', rating: 4},
-].map(m => ({user_id: 1, version: '1.2.0', game_version: '0.3.0-maredev', created_at: timestamp, updated_at: timestamp + m.id, approval: 'none', upvotes: 0, downvotes: 0, my_vote: 0, downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}], image_url: m.thumbnail_url ? '/uploads/test.jpg' : '', ...m}));
+].map(m => ({user_id: 1, revision: 1, version: '1.2.0', game_version: '0.3.0-maredev', created_at: timestamp, updated_at: timestamp + m.id, approval: 'none', upvotes: 0, downvotes: 0, my_vote: 0, downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}], image_url: m.thumbnail_url ? '/uploads/test.jpg' : '', ...m}));
 const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jGpcAAAAASUVORK5CYII=', 'base64');
 const files = new Map(['index.html', 'app.js', 'editor.js', 'style.css', 'default-mod.png'].map(name => [name, fs.readFileSync(path.join(root, 'web', name))]));
 let session;
+let fixtureUser = {id: 1, username: 'owner', role: 'user'};
+let pendingImport = true;
+let publishedImport = null;
+const importFixture = {id: 10, reason: 'Confirm the matching listing.', source: {url: 'https://desuarchive.org/mlp/thread/1/#2', text: '<img src=x onerror="window.unsafe=true"> Source post'}, entry: {name: 'Imported mod', version: '2.0', short_description: 'A discovered mod.', description: 'Install the package.', downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}]}};
 async function evaluate(expression) {
   const result = await call('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}, session);
   if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
@@ -75,9 +79,14 @@ async function screenshot(name) {
     if (message.method !== 'Fetch.requestPaused') return;
     const request = message.params, url = new URL(request.request.url);
     let body, type = 'application/json', status = 200;
-    if (url.pathname === '/') {body = files.get('index.html'); type = 'text/html';}
+    if (['/', '/login', '/admin'].includes(url.pathname)) {body = files.get('index.html'); type = 'text/html';}
     else if (files.has(url.pathname.slice(1))) {body = files.get(url.pathname.slice(1)); type = url.pathname.endsWith('.png') ? 'image/png' : url.pathname.endsWith('.css') ? 'text/css' : 'text/javascript';}
-    else if (url.pathname === '/api/session') body = Buffer.from(JSON.stringify({user: {id: 1, username: 'owner', role: 'user'}, csrf: 'test'}));
+    else if (url.pathname === '/api/session') body = Buffer.from(JSON.stringify({user: fixtureUser, csrf: 'test'}));
+    else if (url.pathname === '/api/site') body = Buffer.from(JSON.stringify({current_thread: 'https://boards.4chan.org/mlp/thread/43715264'}));
+    else if (url.pathname === '/api/admin/users') body = Buffer.from(JSON.stringify([{...fixtureUser, created_at: timestamp, mods: mods.length, votes: 0}]));
+    else if (url.pathname === '/api/admin/import-errors') body = Buffer.from('[]');
+    else if (url.pathname === '/api/admin/imports') body = Buffer.from(JSON.stringify(pendingImport ? [importFixture] : []));
+    else if (url.pathname === '/api/admin/imports/10') {publishedImport = JSON.parse(request.request.postData); pendingImport = false; body = Buffer.from('{"id":1,"warning":""}');}
     else if (url.pathname === '/api/mods') body = Buffer.from(JSON.stringify(mods));
     else if (/^\/api\/mods\/\d+$/.test(url.pathname)) body = Buffer.from(JSON.stringify(mods.find(m => m.id === Number(url.pathname.split('/').pop()))));
     else if (/^\/uploads\//.test(url.pathname)) {body = image; type = 'image/png';}
@@ -137,13 +146,31 @@ async function screenshot(name) {
   assert.equal(await evaluate("document.querySelector('#image-editor legend').textContent"), 'Image (optional)');
   await evaluate("document.querySelector('#field-name').value = 'No picture'; document.querySelector('#field-version').value = '1.0'; document.querySelector('#field-short_description').value = 'A mod without a picture'; document.querySelector('[data-filename]').value = 'mod.pck'; document.querySelector('[data-url]').value = 'https://example.org/mod.pck';");
   assert(await evaluate("document.querySelector('#mod-form').checkValidity()"), 'The add form requires an image');
+  fixtureUser = null;
+  await call('Page.navigate', {url: 'http://he-mod-index.test/'}, session);
+  await until("document.querySelectorAll('[data-index-mod]').length === 4");
+  assert.equal(await evaluate("document.querySelectorAll('nav a[href=\"/login\"], nav a[href=\"/register\"], nav a[href=\"/submit\"]').length"), 0);
+  assert(await evaluate("[...document.querySelectorAll('[data-vote]')].every(b => b.disabled)"));
+  assert.equal(await evaluate("document.querySelector('link[rel=alternate]').getAttribute('href')"), '/feed.xml');
+  await call('Page.navigate', {url: 'http://he-mod-index.test/login'}, session);
+  await until("Boolean(document.querySelector('#auth-form'))");
+  assert.equal(await evaluate("document.querySelector('a[href=\"/register\"]')"), null);
+  fixtureUser = {id: 1, username: 'operator', role: 'admin'};
+  await call('Page.navigate', {url: 'http://he-mod-index.test/admin'}, session);
+  await until("Boolean(document.querySelector('[data-import-publish]'))");
+  assert.equal(await evaluate('window.unsafe'), undefined);
+  await evaluate("document.querySelector('[data-import-target]').value = '1'; document.querySelector('[data-import-publish]').click()");
+  await until("!document.querySelector('[data-import-publish]')");
+  assert.deepEqual(publishedImport, {action: 'publish', target_id: 1, revision: 1});
   assert.deepEqual(errors, [], `Browser errors: ${errors.join('\n')}`);
-  console.log(`Browser checks passed: column order, post styling, equal collapsed row heights (${heights[0]}px desktop), text truncation, Show more/less, sorting, full-text filtering, escaped content, mobile scrolling, local fallback images, and optional image input.`);
+  console.log(`Browser checks passed: column order, post styling, equal collapsed row heights (${heights[0]}px desktop), text truncation, Show more/less, sorting, full-text filtering, escaped content, mobile scrolling, local fallback images, optional image input, anonymous navigation, and admin import resolution.`);
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {
   closing = true;
   if (browser.exitCode === null && !browser.signalCode) {
-    browser.kill('SIGTERM');
-    await new Promise(resolve => {browser.once('exit', resolve); setTimeout(() => {browser.kill('SIGKILL'); resolve();}, 1000).unref();});
+    const exited = new Promise(resolve => browser.once('exit', resolve));
+    try {await call('Browser.close');} catch (_) {}
+    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2000))]);
+    if (browser.exitCode === null && !browser.signalCode) {browser.kill('SIGKILL'); await exited;}
   }
-  fs.rmSync(profile, {recursive: true, force: true});
+  await fs.promises.rm(profile, {recursive: true, force: true, maxRetries: 5, retryDelay: 100});
 });

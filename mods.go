@@ -39,6 +39,7 @@ type mod struct {
 	MyVote       int      `json:"my_vote"`
 	ThumbnailURL string   `json:"thumbnail_url"`
 	ImageCrop    cropRect `json:"image_crop"`
+	SourceURL    string   `json:"source_url"`
 }
 
 func validURL(s string) bool {
@@ -79,13 +80,14 @@ func (in *modInput) validate(id int64) error {
 	return nil
 }
 
-const modSelect = `SELECT m.id,m.user_id,CASE WHEN u.anonymous=1 THEN 'Anonymous' ELSE u.username END,m.name,m.version,m.game_version,m.download_url,m.downloads_json,m.repository_url,m.short_description,m.description,m.image_url,m.thumbnail_url,m.crop_x,m.crop_y,m.crop_size,m.created_at,m.updated_at,m.revision,
+const modSelect = `SELECT m.id,m.user_id,CASE WHEN u.anonymous=1 THEN 'Anonymous' ELSE COALESCE((SELECT author FROM mod_sources WHERE mod_id=m.id),u.username) END,m.name,m.version,m.game_version,m.download_url,m.downloads_json,m.repository_url,m.short_description,m.description,m.image_url,m.thumbnail_url,m.crop_x,m.crop_y,m.crop_size,m.created_at,m.updated_at,m.revision,
  CASE WHEN m.approved_by IS NULL THEN 'none' WHEN m.approved_revision=m.revision THEN 'current' ELSE 'stale' END,
  CASE WHEN reviewer.id IS NULL THEN '' WHEN reviewer.anonymous=1 THEN 'Anonymous' ELSE reviewer.username END,COALESCE(m.approved_at,0),
  COALESCE((SELECT SUM(value) FROM votes WHERE mod_id=m.id),0),
  (SELECT COUNT(*) FROM votes WHERE mod_id=m.id AND value=1),
  (SELECT COUNT(*) FROM votes WHERE mod_id=m.id AND value=-1),
- COALESCE((SELECT value FROM votes WHERE mod_id=m.id AND user_id=?),0)
+ COALESCE((SELECT value FROM votes WHERE mod_id=m.id AND user_id=?),0),
+ COALESCE((SELECT source_url FROM mod_sources WHERE mod_id=m.id),'')
  FROM mods m JOIN users u ON u.id=m.user_id LEFT JOIN users reviewer ON reviewer.id=m.approved_by `
 
 type scanner interface{ Scan(...any) error }
@@ -93,7 +95,7 @@ type scanner interface{ Scan(...any) error }
 func scanMod(s scanner) (mod, error) {
 	var m mod
 	var downloads string
-	err := s.Scan(&m.ID, &m.UserID, &m.Author, &m.Name, &m.Version, &m.GameVersion, &m.DownloadURL, &downloads, &m.RepositoryURL, &m.ShortDescription, &m.Description, &m.ImageURL, &m.ThumbnailURL, &m.ImageCrop.X, &m.ImageCrop.Y, &m.ImageCrop.Size, &m.CreatedAt, &m.UpdatedAt, &m.Revision, &m.Approval, &m.ApprovedBy, &m.ApprovedAt, &m.Rating, &m.Upvotes, &m.Downvotes, &m.MyVote)
+	err := s.Scan(&m.ID, &m.UserID, &m.Author, &m.Name, &m.Version, &m.GameVersion, &m.DownloadURL, &downloads, &m.RepositoryURL, &m.ShortDescription, &m.Description, &m.ImageURL, &m.ThumbnailURL, &m.ImageCrop.X, &m.ImageCrop.Y, &m.ImageCrop.Size, &m.CreatedAt, &m.UpdatedAt, &m.Revision, &m.Approval, &m.ApprovedBy, &m.ApprovedAt, &m.Rating, &m.Upvotes, &m.Downvotes, &m.MyVote, &m.SourceURL)
 	if err == nil {
 		err = json.Unmarshal([]byte(downloads), &m.Downloads)
 	}
