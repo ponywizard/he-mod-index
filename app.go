@@ -109,6 +109,7 @@ func (a *app) routes() http.Handler {
 	m.HandleFunc("POST /api/tokens", a.handle(a.createToken))
 	m.HandleFunc("DELETE /api/tokens/{id}", a.handle(a.deleteToken))
 	m.HandleFunc("GET /api/mods", a.handle(a.listMods))
+	m.HandleFunc("GET /feed.xml", a.handle(a.feed))
 	m.HandleFunc("GET /api/mods/{id}", a.handle(a.getMod))
 	m.HandleFunc("POST /api/mods", a.handle(a.createMod))
 	m.HandleFunc("PUT /api/mods/{id}", a.handle(a.updateMod))
