@@ -11,9 +11,15 @@ Do not register accounts or call write endpoints as part of this workflow.
 - `GET /api/mods/{id}/history` returns published source entries, newest first.
   Each entry has `post_id`, `posted_at`, `source_url`, `name`, `version`,
   `short_description`, `description`, and `downloads`. Held imports are excluded.
+  The `source` object contains the saved original post (`id`, `author`, `time`,
+  `text`, `url`, `image`, `links`, and `replies`).
   Listings without imported history return an empty array; unknown IDs return 404.
   A post may be accepted as history without becoming the current release. Use
   `/api/mods/{id}` for the current version and downloads.
+- `GET /api/source-posts/{post_id}/image` serves a locally cached attachment for
+  a published source post; missing or unavailable attachments return an error.
+- Merged listing GET/HEAD URLs redirect to their surviving listing, including API
+  history/images URLs. Writes to retired IDs are not redirected.
 - `GET /api/mods/{id}/images` returns retained thread images, newest first. Each
   has local `image_url` and `thumbnail_url`, a Desuarchive `source_url`, `post_id`,
   `posted_at`, `version`, and a plain-text `description` from its announcement.

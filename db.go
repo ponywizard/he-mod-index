@@ -37,7 +37,7 @@ func openDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 func migrateDB(db *sql.DB) (err error) {
 	// Table rebuilds require foreign_keys to be disabled before the transaction.
@@ -160,6 +160,12 @@ func migrateDB(db *sql.DB) (err error) {
 		if _, err = tx.Exec(schemaV8); err != nil {
 			return err
 		}
+		version = 8
+	}
+	if version == 8 {
+		if _, err = tx.Exec(schemaV9); err != nil {
+			return err
+		}
 	}
 	rows, err := tx.Query("PRAGMA foreign_key_check")
 	if err != nil {
@@ -176,6 +182,16 @@ func migrateDB(db *sql.DB) (err error) {
 	}
 	return tx.Commit()
 }
+
+// Retired listing IDs redirect to a surviving listing after an operator merge.
+const schemaV9 = `
+CREATE TABLE IF NOT EXISTS mod_redirects (
+ old_id INTEGER PRIMARY KEY CHECK(old_id>0),
+ mod_id INTEGER NOT NULL REFERENCES mods(id) ON DELETE CASCADE,
+ CHECK(old_id<>mod_id)
+);
+PRAGMA user_version=9;
+`
 
 // Each published announcement retains its local image independently of the
 // current index thumbnail. Empty URLs mark an explicitly removed image, so a

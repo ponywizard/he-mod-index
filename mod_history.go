@@ -22,6 +22,7 @@ type modHistoryEntry struct {
 	ShortDescription string     `json:"short_description"`
 	Description      string     `json:"description"`
 	Downloads        []download `json:"downloads"`
+	Source           threadPost `json:"source"`
 	sourceText       string
 }
 type historyReader interface {
@@ -56,6 +57,7 @@ func readModHistory(ctx context.Context, db historyReader, id int64) ([]modHisto
 		item.Description = entry.Description
 		item.Downloads = entry.Downloads
 		item.sourceText = post.Text
+		item.Source = post
 		list = append(list, item)
 	}
 	return list, rows.Err()

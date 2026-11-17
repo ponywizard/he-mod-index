@@ -238,6 +238,17 @@ imports**. Inspect the post date, source, description, and download links, then:
   works on manually submitted or edited listings without enabling automatic edits.
 - **Dismiss** removes an irrelevant or redundant candidate from the queue.
 
+Original source posts and their locally cached attachments are embedded in the
+review card and published post history. Quoted context is expandable separately.
+Viewing an attachment does not add it to the mod gallery or change its cover.
+
+Polling dismisses pending recommendations that borrow their download from quoted
+posts, and repeated links under the same name without a new version. It preserves
+published history and operator dismissals. To preview or apply this cleanup without
+model calls, run `ingest prune --dry-run` or `ingest prune` with the usual `DATA_DIR`.
+Accepted historical names also prevent renamed mods from being imported as duplicates;
+ambiguous identity and intervening manual edits still require review.
+
 Import acceptance does not award a release approval check. Manual updates preserve
 the target's ownership; listings owned by a different account continue to require
 manual resolution. Model refusals/invalid extraction appear in
@@ -435,7 +446,7 @@ multipart downloads, thumbnail crops, remote-image validation, migrations,
 account wizard validation/cancellation, and deletion cascades. Tests never write
 to the running site's data.
 
-Schema version 8 is recorded in `PRAGMA user_version`. A transaction migrates
+Schema version 9 is recorded in `PRAGMA user_version`. A transaction migrates
 older versions automatically, preserving listings, votes, and release checks.
 Version 4 removes the retired Hot metric's activity table and index.
 Version 5 preserves existing IDs and prevents reuse of subsequently deleted
@@ -447,6 +458,8 @@ Added/Updated dates from the earliest/latest accepted source posts. Other
 listings keep their existing dates; content, ownership, and review checks remain intact.
 Version 8 adds retained source image records. Existing covers are preserved; run
 `ingest images` to populate galleries for previously published announcements.
+Version 9 adds redirects for merged listing IDs. Only GET/HEAD requests redirect;
+stale writes cannot modify the surviving listing.
 Existing accounts keep their username display until they enable Anonymous.
 Existing single downloads become one-item arrays with a filename inferred from the URL.
 Existing local screenshots get centered thumbnails on startup; authors can

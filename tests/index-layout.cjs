@@ -55,7 +55,7 @@ let session;
 let fixtureUser = {id: 1, username: 'owner', role: 'user'};
 let pendingImport = true;
 let publishedImport = null;
-const importFixture = {id: 10, reason: 'Confirm the matching listing.', source: {time: timestamp - 1000, url: 'https://desuarchive.org/mlp/thread/1/#2', text: '<img src=x onerror="window.unsafe=true"> Source post'}, entry: {name: 'Imported mod', version: '2.0', short_description: 'A discovered mod.', description: 'Install the package.', downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}]}};
+const importFixture = {id: 10, reason: 'Confirm the matching listing.', source: {id: 2, author: "Anonymous", image: "https://example.org/source.png", time: timestamp - 1000, url: 'https://desuarchive.org/mlp/thread/1/#2', text: '<img src=x onerror="window.unsafe=true"> Source post'}, entry: {name: 'Imported mod', version: '2.0', short_description: 'A discovered mod.', description: 'Install the package.', downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}]}};
 async function evaluate(expression) {
   const result = await call('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}, session);
   if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
@@ -89,10 +89,10 @@ async function screenshot(name) {
     else if (url.pathname === '/api/admin/imports') body = Buffer.from(JSON.stringify(pendingImport ? [importFixture] : []));
     else if (url.pathname === '/api/admin/imports/10') {publishedImport = JSON.parse(request.request.postData); pendingImport = false; body = Buffer.from('{"id":1,"warning":""}');}
     else if (/^\/api\/mods\/\d+\/images$/.test(url.pathname)) body = Buffer.from(JSON.stringify(url.pathname.includes('/1/') ? gallery : url.pathname.includes('/3/') ? [gallery[0]] : []));
-    else if (/^\/api\/mods\/\d+\/history$/.test(url.pathname)) body = Buffer.from(JSON.stringify([{version: '1.0', posted_at: timestamp, source_url: 'https://desuarchive.org/mlp/thread/1/#2', short_description: 'Original release', description: '<img src=x onerror="window.unsafe=true"> Historical notes', downloads: mods[0].downloads}]));
+    else if (/^\/api\/mods\/\d+\/history$/.test(url.pathname)) body = Buffer.from(JSON.stringify([{version: '1.0', posted_at: timestamp, source_url: 'https://desuarchive.org/mlp/thread/1/#2', source: importFixture.source, short_description: 'Original release', description: '<img src=x onerror="window.unsafe=true"> Historical notes', downloads: mods[0].downloads}]));
     else if (url.pathname === '/api/mods') body = Buffer.from(JSON.stringify(mods));
     else if (/^\/api\/mods\/\d+$/.test(url.pathname)) body = Buffer.from(JSON.stringify(mods.find(m => m.id === Number(url.pathname.split('/').pop()))));
-    else if (/^\/uploads\//.test(url.pathname)) {body = image; type = 'image/png';}
+    else if (/^\/api\/source-posts\/\d+\/image$/.test(url.pathname) || /^\/uploads\//.test(url.pathname)) {body = image; type = 'image/png';}
     else {body = Buffer.alloc(0); status = url.pathname === '/favicon.ico' ? 204 : 404;}
     call('Fetch.fulfillRequest', {requestId: request.requestId, responseCode: status, responseHeaders: [{name: 'Content-Type', value: type}, {name: 'Content-Security-Policy', value: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"}], body: body.toString('base64')}, message.sessionId).catch(error => {if (!closing) errors.push(error.message);});
   };
@@ -147,7 +147,7 @@ async function screenshot(name) {
   await screenshot('index-mobile.png');
   await evaluate("document.querySelector('a.mod-name[href=\"/mod/4\"]').click()");
   await until("Boolean(document.querySelector('.detail-header'))");
-  assert.equal(await evaluate("document.querySelectorAll('#view img').length"), 0);
+  assert.equal(await evaluate("document.querySelectorAll('#view img:not([data-source-image])').length"), 0);
   assert.equal(await evaluate("document.querySelector('.mod-gallery')"), null);
   assert.equal(await evaluate("document.querySelector('.release-history summary').textContent"), 'Post history (1)');
   await evaluate("document.querySelector('.release-history summary').click()");
@@ -224,6 +224,9 @@ async function screenshot(name) {
   assert.equal(await evaluate("document.querySelector('[data-import-publish]').textContent"), 'Update listing');
   assert.equal(await evaluate("document.querySelector('[data-import-history]').hidden"), false);
   assert.equal(await evaluate("document.querySelector('[data-import-current] a').getAttribute('href')"), '/mod/1');
+  assert.equal(await evaluate("document.querySelector('[data-import] > .source-post .source-body').textContent"), importFixture.source.text);
+  assert.equal(await evaluate("document.querySelector('[data-source-image]').getAttribute('src')"), '/api/source-posts/2/image');
+  assert.equal(await evaluate("document.querySelector('.source-post').closest('details')"), null);
   await screenshot('imports-desktop.png');
   await call('Emulation.setDeviceMetricsOverride', {width: 390, height: 844, deviceScaleFactor: 1, mobile: true}, session);
   assert(await evaluate("document.querySelector('[data-import-target]').getBoundingClientRect().right <= document.querySelector('[data-import]').getBoundingClientRect().right"), 'Import selector overflows its panel on mobile');

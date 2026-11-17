@@ -18,7 +18,7 @@ import (
 )
 
 type ingestOptions struct {
-	evalExtract                                                         bool
+	evalExtract, dryRun                                                 bool
 	command, model, extractModel, envFile, start, sources, labels, from string
 	owner                                                               int64
 	budget                                                              float64
@@ -34,6 +34,7 @@ func parseIngest(args []string, out io.Writer) (ingestOptions, error) {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.BoolVar(&o.evalExtract, "extract", false, "evaluate extraction instead of classification")
+	fs.BoolVar(&o.dryRun, "dry-run", false, "preview prune decisions without changing the queue")
 	fs.StringVar(&o.extractModel, "extract-model", "gpt-5.4-mini", "model for extraction and history-based descriptions")
 	fs.StringVar(&o.model, "model", "gpt-6-luna", "OpenAI model with verified price")
 	fs.StringVar(&o.envFile, "env-file", "", "read only OPENAI_KEY/API_KEY from this file")
@@ -45,14 +46,14 @@ func parseIngest(args []string, out io.Writer) (ingestOptions, error) {
 	fs.Float64Var(&o.budget, "budget", 5, "cumulative API spending cap in USD for this database")
 	fs.BoolVar(&o.collectOnly, "collect-only", false, "collect source posts without API calls or publication")
 	fs.Usage = func() {
-		fmt.Fprintln(out, "Usage: he-mod-index ingest hydrate|poll|process|status|eval|merge|summarize|images [flags]\nUses DATA_DIR. hydrate collects archive threads; poll discovers and reads live threads.\nprocess resumes saved work; eval measures classifier recall/precision on labeled posts.")
+		fmt.Fprintln(out, "Usage: he-mod-index ingest hydrate|poll|process|status|eval|merge|summarize|images|prune [flags]\nUses DATA_DIR. hydrate collects archive threads; poll discovers and reads live threads.\nprocess resumes saved work; eval measures classifier recall/precision on labeled posts.")
 		fs.PrintDefaults()
 	}
 	if o.command == "--help" || o.command == "-h" {
 		fs.Usage()
 		return o, flag.ErrHelp
 	}
-	if o.command != "hydrate" && o.command != "poll" && o.command != "process" && o.command != "status" && o.command != "eval" && o.command != "merge" && o.command != "summarize" && o.command != "images" {
+	if o.command != "hydrate" && o.command != "poll" && o.command != "process" && o.command != "status" && o.command != "eval" && o.command != "merge" && o.command != "summarize" && o.command != "images" && o.command != "prune" {
 		return o, errors.New("unknown ingest command; use ingest --help")
 	}
 	if err := fs.Parse(args[1:]); err != nil {
@@ -278,6 +279,9 @@ func (a *app) pollThreadsWith(ctx context.Context, f *threadFetcher) error {
 	return err
 }
 func (a *app) publishPending(ctx context.Context, owner int64) error {
+	if _, err := a.prunePendingImports(ctx, false); err != nil {
+		return err
+	}
 	rows, err := a.db.Query(candidateSelect + " WHERE c.state='pending' ORDER BY c.post_id,c.ordinal")
 	if err != nil {
 		return err
@@ -363,6 +367,13 @@ func (a *app) runIngest(ctx context.Context, o ingestOptions, out io.Writer) err
 		if err = a.db.QueryRow("SELECT role FROM users WHERE id=?", o.owner).Scan(&role); err != nil || role != "admin" {
 			return errors.New("--owner must identify an existing admin account")
 		}
+	}
+	if o.command == "prune" {
+		decisions, err := a.prunePendingImports(ctx, o.dryRun)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(out).Encode(decisions)
 	}
 	if o.command == "images" {
 		if err = a.backfillGallery(ctx, o.owner); err != nil {

@@ -220,11 +220,12 @@ func (a *app) extractPost(ctx context.Context, c *modelClient, p threadPost) err
 }
 
 type importCandidate struct {
-	ID     int64        `json:"id"`
-	PostID int64        `json:"post_id"`
-	Entry  extractedMod `json:"entry"`
-	Reason string       `json:"reason"`
-	Source threadPost   `json:"source"`
+	ID      int64        `json:"id"`
+	PostID  int64        `json:"post_id"`
+	Entry   extractedMod `json:"entry"`
+	Reason  string       `json:"reason"`
+	Source  threadPost   `json:"source"`
+	Context []threadPost `json:"context,omitempty"`
 }
 
 func candidateFrom(s scanner) (importCandidate, error) {
@@ -337,6 +338,35 @@ func matchImport(tx *sql.Tx, c importCandidate, owner int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Accepted history remembers names that an operator has reconciled. An alias
+	// can prevent a duplicate, but does not bypass provenance or manual-edit checks.
+	aliases := map[int64]map[string]bool{}
+	history, err := tx.Query("SELECT mod_id,payload FROM ingest_candidates WHERE state='published' AND mod_id IS NOT NULL")
+	if err != nil {
+		return 0, err
+	}
+	for history.Next() {
+		var id int64
+		var raw string
+		var entry extractedMod
+		if err = history.Scan(&id, &raw); err != nil {
+			history.Close()
+			return 0, err
+		}
+		if err = json.Unmarshal([]byte(raw), &entry); err != nil {
+			history.Close()
+			return 0, err
+		}
+		if aliases[id] == nil {
+			aliases[id] = map[string]bool{}
+		}
+		aliases[id][normalizedName(entry.Name)] = true
+	}
+	err = history.Err()
+	history.Close()
+	if err != nil {
+		return 0, err
+	}
 	possible := []mod{}
 	repos := entryRepositories(c.Entry)
 	for _, m := range list {
@@ -377,7 +407,7 @@ func matchImport(tx *sql.Tx, c importCandidate, owner int64) (int64, error) {
 				possibleAlias = true
 			}
 		}
-		if sameName || linked || possibleAlias || c.Entry.PreviousPostID > 0 && sourcePosts[m.ID] == c.Entry.PreviousPostID {
+		if sameName || aliases[m.ID][normalizedName(c.Entry.Name)] || linked || possibleAlias || c.Entry.PreviousPostID > 0 && sourcePosts[m.ID] == c.Entry.PreviousPostID {
 			possible = append(possible, m)
 		}
 	}
@@ -549,6 +579,13 @@ func (a *app) listCandidates(w http.ResponseWriter, r *http.Request) error {
 	}
 	if err = rows.Err(); err != nil {
 		return err
+	}
+	rows.Close()
+	for index := range list {
+		list[index].Context, err = a.postContext([]threadPost{list[index].Source})
+		if err != nil {
+			return err
+		}
 	}
 	return writeJSON(w, 200, list)
 }

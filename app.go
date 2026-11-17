@@ -114,6 +114,7 @@ func (a *app) routes() http.Handler {
 	m.HandleFunc("GET /api/mods/{id}", a.handle(a.getMod))
 	m.HandleFunc("GET /api/mods/{id}/history", a.handle(a.getModHistory))
 	m.HandleFunc("GET /api/mods/{id}/images", a.handle(a.getModImages))
+	m.HandleFunc("GET /api/source-posts/{id}/image", a.handle(a.sourcePostImage))
 	m.HandleFunc("POST /api/mods", a.handle(a.createMod))
 	m.HandleFunc("PUT /api/mods/{id}", a.handle(a.updateMod))
 	m.HandleFunc("DELETE /api/mods/{id}", a.handle(a.deleteMod))
@@ -175,6 +176,12 @@ func (a *app) routes() http.Handler {
 				_ = writeJSON(w, 403, map[string]string{"error": "Origin rejected."})
 				return
 			}
+		}
+		if redirected, err := a.redirectMergedMod(w, r); err != nil {
+			_ = writeJSON(w, 500, map[string]string{"error": "Server error."})
+			return
+		} else if redirected {
+			return
 		}
 		m.ServeHTTP(w, r)
 	})

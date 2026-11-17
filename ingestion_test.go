@@ -20,6 +20,7 @@ func seedCandidate(t *testing.T, a *app, postID int64, e extractedMod) importCan
 	p := normalizePost(threadPost{ID: postID, ThreadID: 40000000, Time: postID, Author: "Anonymous", Text: "Released " + e.Name, URL: "https://desuarchive.org/mlp/thread/40000000/#post"})
 	for _, d := range e.Downloads {
 		p.Links = append(p.Links, d.URL)
+		p.Text += "\n" + d.URL
 	}
 	if e.RepositoryURL != "" {
 		p.Links = append(p.Links, e.RepositoryURL)
@@ -405,7 +406,7 @@ func TestStagingMergeIsAdditiveAndIdempotent(t *testing.T) {
 	}
 }
 
-func TestExtractorHoldsQuotesAndDiscardsUnrelatedContext(t *testing.T) {
+func TestExtractorDiscardsQuotesAndUnrelatedContext(t *testing.T) {
 	a := testApp(t)
 	p := normalizePost(threadPost{ID: 40000001, Text: ">https://example.org/mod.pck\nTried it and it crashes. Any fix?", Image: "https://example.org/reaction.gif"})
 	contextPost := normalizePost(threadPost{ID: 40000000, Text: "New other mod https://example.org/other.pck", Image: "https://example.org/old.png"})
@@ -431,12 +432,8 @@ func TestExtractorHoldsQuotesAndDiscardsUnrelatedContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
-		t.Fatal("kept base game or context-only release", entries)
-	}
-	e := entries[0]
-	if e.Confidence != "uncertain" || e.GameVersion != "" || e.ImageURL != "" || e.Version != "Unversioned" || e.Downloads[0].Filename != "mod.pck" {
-		t.Fatal("unguarded model fields", e)
+	if len(entries) != 0 {
+		t.Fatal("kept quoted recommendation or context-only release", entries)
 	}
 }
 

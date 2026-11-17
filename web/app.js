@@ -154,9 +154,19 @@ async function editorPage(id, current) {
     navigate(`/mod/${saved.id}`);
   });
 }
+function sourcePost(post) {
+  const lines = post.text.split('\n').map(line => `<span${line.trimStart().startsWith('>') ? ' class="source-quote"' : ''}>${esc(line)}</span>`).join('\n');
+  const image = post.image && /\.(?:png|jpe?g|gif)(?:\?|$)/i.test(post.image) ? `/api/source-posts/${Number(post.id)}/image` : '';
+  return `<article class="source-post"><div class="source-heading"><span class="post-author">${esc(post.author || 'Anonymous')}</span><time datetime="${new Date(post.time * 1000).toISOString()}">${date(post.time)}</time>${link(post.url, `No. ${post.id}`)}</div>${image ? `<a class="source-attachment" href="${image}" target="_blank" rel="noopener noreferrer"><img src="${image}" alt="Post attachment" loading="lazy" data-source-image><span hidden>Attachment unavailable</span></a>` : ''}<div class="source-body">${lines}</div></article>`;
+}
+document.addEventListener('error', event => {
+  if (!event.target.matches?.('[data-source-image]')) return;
+  event.target.hidden = true;
+  event.target.nextElementSibling.hidden = false;
+}, true);
 function releaseHistory(releases) {
   if (!releases.length) return '';
-  return `<details class="release-history"><summary>Post history (${releases.length})</summary><ol>${releases.map(r => `<li><div class="history-heading">${link(r.source_url, r.version)} · <time datetime="${new Date(r.posted_at * 1000).toISOString()}">${date(r.posted_at)}</time></div><p>${esc(r.short_description)}</p>${r.description ? `<div class="description">${esc(r.description)}</div>` : ''}<ul class="downloads">${r.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul></li>`).join('')}</ol></details>`;
+  return `<details class="release-history"><summary>Post history (${releases.length})</summary><ol>${releases.map(r => `<li><div class="history-heading">${link(r.source_url, r.version)} · <time datetime="${new Date(r.posted_at * 1000).toISOString()}">${date(r.posted_at)}</time></div><p>${esc(r.short_description)}</p>${r.description ? `<div class="description">${esc(r.description)}</div>` : ''}${r.source ? sourcePost(r.source) : ''}<ul class="downloads">${r.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul></li>`).join('')}</ol></details>`;
 }
 function imageCaption(im) {
   return `<p>${esc(im.description)}</p><div class="image-source"><span>${im.version === 'Unversioned' ? 'Unversioned' : `Version ${esc(im.version)}`}</span> · ${link(im.source_url, 'Desuarchive post')} · ${date(im.posted_at)}</div>`;
@@ -247,9 +257,10 @@ async function accountPage(current) {
 function importCard(c, allMods) {
   return `<section class="panel" data-import="${c.id}">
     <h3>${esc(c.entry.name)} · ${esc(c.entry.version)}</h3>
-    <p class="muted">Posted ${date(c.source.time)} · ${link(c.source.url, 'Source post')}</p>
     <p>${esc(c.reason)}</p><p>${esc(c.entry.short_description)}</p>
-    <details><summary>Description and source</summary><div class="description">${esc(c.entry.description)}</div><div class="description">${esc(c.source.text)}</div></details>
+    ${sourcePost(c.source)}
+    ${c.context?.length ? `<details class="source-context"><summary>Quoted posts (${c.context.length})</summary>${c.context.map(sourcePost).join('')}</details>` : ''}
+    <details><summary>Extracted description</summary><div class="description">${esc(c.entry.description)}</div></details>
     <ul>${c.entry.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul>
     <label>Listing <select data-import-target><option value="0" data-revision="0">New listing</option>${allMods.map(m => `<option value="${m.id}" data-revision="${m.revision}" data-updated="${m.updated_at}">${esc(m.name)} · ${esc(m.version)}</option>`).join('')}</select></label>
     <p class="muted" data-import-current hidden></p>
