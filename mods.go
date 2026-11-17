@@ -278,13 +278,27 @@ func (a *app) updateMod(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	defer tx.Rollback()
+	current, err := scanMod(tx.QueryRow(modSelect+" WHERE m.id=?", 0, old.ID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return problem(409, "Mod changed. Reload and try again.")
+	}
+	if err != nil {
+		return err
+	}
+	if fingerprint(current) != fingerprint(old) {
+		return problem(409, "Mod changed. Reload and try again.")
+	}
+	updatedAt := time.Now().Unix()
+	if old.SourceURL != "" {
+		updatedAt = old.UpdatedAt
+	}
 	release := old.Version != in.Version || !sameReleaseDownloads(old.Downloads, in.Downloads)
 	var bump int
 	if release {
 		bump = 1
 	}
 	downloads, _ := json.Marshal(in.Downloads)
-	res, err := tx.Exec(`UPDATE mods SET name=?,version=?,game_version=?,download_url=?,downloads_json=?,repository_url=?,short_description=?,description=?,image_url=?,updated_at=?,revision=revision+? WHERE id=? AND user_id=? AND revision=? AND updated_at=? AND image_url=?`, in.Name, in.Version, in.GameVersion, in.DownloadURL, string(downloads), in.RepositoryURL, in.ShortDescription, in.Description, media.ImageURL, time.Now().Unix(), bump, old.ID, old.UserID, old.Revision, old.UpdatedAt, old.ImageURL)
+	res, err := tx.Exec(`UPDATE mods SET name=?,version=?,game_version=?,download_url=?,downloads_json=?,repository_url=?,short_description=?,description=?,image_url=?,updated_at=?,revision=revision+? WHERE id=? AND user_id=? AND revision=? AND updated_at=? AND image_url=?`, in.Name, in.Version, in.GameVersion, in.DownloadURL, string(downloads), in.RepositoryURL, in.ShortDescription, in.Description, media.ImageURL, updatedAt, bump, old.ID, old.UserID, old.Revision, old.UpdatedAt, old.ImageURL)
 	if err != nil {
 		return err
 	}

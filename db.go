@@ -37,7 +37,7 @@ func openDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 func migrateDB(db *sql.DB) (err error) {
 	// Table rebuilds require foreign_keys to be disabled before the transaction.
@@ -148,6 +148,12 @@ func migrateDB(db *sql.DB) (err error) {
 		if _, err = tx.Exec(schemaV6); err != nil {
 			return err
 		}
+		version = 6
+	}
+	if version == 6 {
+		if _, err = tx.Exec(schemaV7); err != nil {
+			return err
+		}
 	}
 	rows, err := tx.Query("PRAGMA foreign_key_check")
 	if err != nil {
@@ -164,6 +170,21 @@ func migrateDB(db *sql.DB) (err error) {
 	}
 	return tx.Commit()
 }
+
+// Keep imported publication dates tied to the accepted source history. Summary
+// progress is separate from content so rebuilding an overview never bumps a release.
+const schemaV7 = `
+CREATE TABLE IF NOT EXISTS mod_overviews (
+ mod_id INTEGER PRIMARY KEY REFERENCES mods(id) ON DELETE CASCADE,
+ post_id INTEGER NOT NULL REFERENCES ingest_posts(id)
+);
+CREATE INDEX IF NOT EXISTS ingest_mod_history ON ingest_candidates(mod_id,post_id,ordinal) WHERE state='published';
+UPDATE mods SET
+ created_at=COALESCE((SELECT MIN(p.posted_at) FROM ingest_candidates c JOIN ingest_posts p ON p.id=c.post_id WHERE c.mod_id=mods.id AND c.state='published'),(SELECT posted_at FROM mod_sources WHERE mod_id=mods.id)),
+ updated_at=(SELECT posted_at FROM mod_sources WHERE mod_id=mods.id)
+ WHERE EXISTS(SELECT 1 FROM mod_sources WHERE mod_id=mods.id);
+PRAGMA user_version=7;
+`
 
 // Source records are independent of accounts. Candidate publication and mod
 // provenance are committed together; deletion cannot resurrect an old import.

@@ -369,6 +369,10 @@ func TestStagingMergeIsAdditiveAndIdempotent(t *testing.T) {
 	if _, err := source.db.Exec("UPDATE ingest_posts SET state='done'; INSERT INTO ingest_usage(model,stage,reserved_micros,actual_micros,created_at) VALUES('gpt-6-luna','extract',1000,500,100)"); err != nil {
 		t.Fatal(err)
 	}
+	// Version 6 staging snapshots remain readable after the history migration.
+	if _, err := source.db.Exec("DROP TABLE mod_overviews; PRAGMA user_version=6"); err != nil {
+		t.Fatal(err)
+	}
 	target := testApp(t)
 	c := client(target, "192.0.2.1")
 	c.register(t, "existing")

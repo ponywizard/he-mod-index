@@ -30,3 +30,6 @@
 - Automatic updates require an importer-owned listing, unambiguous provenance,
   a newer source, and no intervening manual edit. Hold other matches for admins.
   Import resolution requires admin sessions; upload tokens cannot resolve it.
+- Preserve published source history. Imported Added/Updated dates belong to the
+  earliest/latest accepted posts. Overview synthesis uses that history, preserves
+  manual edits and release checks, and never advances source dates or revisions.

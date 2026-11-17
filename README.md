@@ -84,7 +84,7 @@ choose their own admin/reviewer usernames in the wizard.
 - Screenshots can be uploaded or imported from a public image URL. Both are
   hosted locally. The editor provides a square thumbnail crop with drag, zoom,
   keyboard, and position controls. The full screenshot is kept for the detail
-  page; a separate 256×256 JPEG thumbnail appears beneath the name in the index.
+  page; a separate 256×256 JPEG thumbnail appears in the first index column.
   Crop changes preserve the full screenshot. Replacing/removing an image or
   deleting its mod/user cleans up both files. PNG/JPEG/GIF input is limited to
   4 MiB, 4,096 pixels per side, and 12 megapixels; GIFs use the first frame.
@@ -103,10 +103,10 @@ choose their own admin/reviewer usernames in the wizard.
   and screenshot/crop changes retain checks.
   Release files should use immutable versioned URLs; replacing a remote binary
   at the same URL cannot be detected by the index.
-- The index columns are Name, Description, Rating, Added, and Updated. Name shows
-  the thumbnail and release check. Description shows the author in green, version
+- The first index column is unlabeled and shows only the thumbnail. Description
+  contains the name link and release check, author in green, version
   information, the short description as a post subject, and the long description.
-  Collapsed rows use the name/thumbnail height; Show more expands long posts inline
+  Description sorts alphabetically by mod name. Collapsed rows have a fixed height; Show more expands long posts inline
   and Show less restores the compact row. The text filter includes the full post.
 - Admins can edit/remove any mod and remove other users in the web UI. Removing
   a user cascades through their mods, votes, sessions, and tokens.
@@ -147,6 +147,29 @@ context-only releases and known base-game/index releases are excluded in code. I
 existing local original/thumbnail pipeline; no synthetic screenshots are made.
 When a version is unstated it reads `Unversioned`. Posted repository/release-page
 links are retained when no direct download is supplied.
+
+Published announcements remain attached to their listing as post history, visible
+on the detail page and at `/api/mods/{id}/history`. Added/Updated use the earliest
+and latest accepted source post dates. Imports preserve the existing overview
+while GPT-5.4 mini synthesizes an overall description from the accepted history,
+including the original purpose and later changes. Later passes extend the saved
+overview with new entries; long histories are folded in chronological chunks.
+Release notes and old downloads remain in history. Held candidates are excluded.
+Overview, image, and manual metadata edits do not change source dates, release
+revisions, or approval status. Manual corrections stop automatic overview edits.
+
+Polling and `ingest process --owner 123` refresh pending overviews after publication.
+After an API-free merge, or to summarize existing imports without processing new
+candidates, run:
+
+```sh
+DATA_DIR=/path/to/live ./he-mod-index ingest summarize --owner 123 --env-file .env --budget 5
+```
+
+This uses the same cumulative budget and `--extract-model`; completed overviews
+are skipped on retry. If a model call fails, the existing description is retained
+and the next run retries. Manual queue publication is summarized on the next poll
+(or via this command) when the target remains importer-owned and unmodified.
 
 The budget is cumulative across restarts and model evaluations. Requests reserve
 an upper estimate before sending; failed requests retain that reservation, and
@@ -231,7 +254,7 @@ malware auditing, and an “Agent Reviewed” badge, are separate future work.
 | `INGEST_POLL_INTERVAL` | `0s` | Disabled by default; use `10m` to poll (minimum `1m`) |
 | `INGEST_OWNER_ID` | empty | Existing admin account ID that owns automatic imports |
 | `INGEST_MODEL` | `gpt-6-luna` | Classification model |
-| `INGEST_EXTRACT_MODEL` | `gpt-5.4-mini` | Descriptions, links, and screenshot selection |
+| `INGEST_EXTRACT_MODEL` | `gpt-5.4-mini` | Extraction and history-based descriptions |
 | `INGEST_BUDGET_USD` | `5` | Cumulative API cap for this database, including hydration |
 
 Set environment variables in your service supervisor. The server does not load
@@ -372,13 +395,16 @@ multipart downloads, thumbnail crops, remote-image validation, migrations,
 account wizard validation/cancellation, and deletion cascades. Tests never write
 to the running site's data.
 
-Schema version 6 is recorded in `PRAGMA user_version`. A transaction migrates
+Schema version 7 is recorded in `PRAGMA user_version`. A transaction migrates
 older versions automatically, preserving listings, votes, and release checks.
 Version 4 removes the retired Hot metric's activity table and index.
 Version 5 preserves existing IDs and prevents reuse of subsequently deleted
 account, mod, and token IDs, so stale requests cannot target replacement records.
 Version 6 adds durable source posts, import candidates, mod provenance, API usage,
-and the current-thread setting. Existing accounts and listings are unchanged.
+and the current-thread setting.
+Version 7 adds overview progress and a history index, and backfills imported
+Added/Updated dates from the earliest/latest accepted source posts. Other
+listings keep their existing dates; content, ownership, and review checks remain intact.
 Existing accounts keep their username display until they enable Anonymous.
 Existing single downloads become one-item arrays with a filename inferred from the URL.
 Existing local screenshots get centered thumbnails on startup; authors can

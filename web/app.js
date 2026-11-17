@@ -60,17 +60,17 @@ function indexTable() {
   const terms = filter.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = mods.filter(m => terms.every(t => `${m.name} ${m.author} ${m.short_description} ${m.description} ${m.version} ${m.game_version} ${(m.downloads || []).map(d => d.filename).join(' ')}`.toLowerCase().includes(t)));
   filtered.sort((a, b) => {const av = a[sort.key], bv = b[sort.key]; const result = typeof av === 'string' ? av.localeCompare(bv) : av - bv; return result * sort.direction || b.id - a.id;});
-  const cols = [['name', 'Name'], ['short_description', 'Description'], ['rating', 'Rating'], ['created_at', 'Added'], ['updated_at', 'Updated']];
+  const cols = [['name', 'Description'], ['rating', 'Rating'], ['created_at', 'Added'], ['updated_at', 'Updated']];
   document.querySelector('#mod-count').textContent = `${filtered.length} / ${mods.length} mods`;
   document.querySelector('#mod-table').innerHTML = `<table class="index">
-    <colgroup><col class="index-name"><col><col class="index-rating"><col class="index-date"><col class="index-date"></colgroup>
-    <thead><tr>${cols.map(([key, label]) => `<th scope="col" aria-sort="${sort.key === key ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}"><button data-sort="${key}">${label}${sort.key === key ? (sort.direction === 1 ? ' ↑' : ' ↓') : ''}</button></th>`).join('')}</tr></thead>
+    <colgroup><col class="index-image"><col><col class="index-rating"><col class="index-date"><col class="index-date"></colgroup>
+    <thead><tr><th scope="col" aria-label="Image"></th>${cols.map(([key, label]) => `<th scope="col" aria-sort="${sort.key === key ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}"><button data-sort="${key}">${label}${sort.key === key ? (sort.direction === 1 ? ' ↑' : ' ↓') : ''}</button></th>`).join('')}</tr></thead>
     <tbody>${filtered.length ? filtered.map(m => {
       const expanded = expandedMods.has(m.id);
       const version = `${m.version}${m.game_version ? ` · HE ${m.game_version}` : ''}`;
       return `<tr data-index-mod="${m.id}"${expanded ? ' class="is-expanded"' : ''}>
-        <td class="mod-title-cell"><div class="name-content"><div class="name-heading"><a class="mod-name" href="/mod/${m.id}" data-nav title="${esc(m.name)}">${esc(m.name)}</a>${badge(m)}</div><a href="/mod/${m.id}" data-nav class="thumbnail-link" aria-label="View ${esc(m.name)}"><img class="thumbnail" src="${esc(m.thumbnail_url || DEFAULT_MOD_IMAGE)}" alt="" width="96" height="96" loading="lazy"></a></div></td>
-        <td class="description-cell"><div class="post-preview" id="mod-post-${m.id}"><div class="post-header"><span class="post-author" title="${esc(m.author)}">${esc(m.author)}</span><span class="post-version" title="${esc(version)}">${esc(version)}</span></div><div class="post-subject">${esc(m.short_description)}</div><div class="post-body">${esc(m.description)}</div><button type="button" class="link-button post-more" data-expand-mod="${m.id}" aria-expanded="${expanded}" aria-controls="mod-post-${m.id}" hidden>${expanded ? 'Show less' : 'Show more'}</button></div></td>
+        <td class="mod-image-cell"><div class="image-content"><a href="/mod/${m.id}" data-nav class="thumbnail-link" aria-label="View ${esc(m.name)}"><img class="thumbnail" src="${esc(m.thumbnail_url || DEFAULT_MOD_IMAGE)}" alt="" width="96" height="96" loading="lazy"></a></div></td>
+        <td class="description-cell"><div class="post-preview" id="mod-post-${m.id}"><div class="name-heading"><a class="mod-name" href="/mod/${m.id}" data-nav title="${esc(m.name)}">${esc(m.name)}</a>${badge(m)}</div><div class="post-header"><span class="post-author" title="${esc(m.author)}">${esc(m.author)}</span><span class="post-version" title="${esc(version)}">${esc(version)}</span></div><div class="post-subject">${esc(m.short_description)}</div><div class="post-body">${esc(m.description)}</div><button type="button" class="link-button post-more" data-expand-mod="${m.id}" aria-expanded="${expanded}" aria-controls="mod-post-${m.id}" hidden>${expanded ? 'Show less' : 'Show more'}</button></div></td>
         <td>${votes(m)}</td><td class="date">${date(m.created_at)}</td><td class="date">${date(m.updated_at)}</td>
       </tr>`;
     }).join('') : `<tr><td colspan="5" class="empty">${mods.length ? 'No matches.' : 'No mods yet.'}</td></tr>`}</tbody>
@@ -86,6 +86,7 @@ function fitPostPreviews() {
   for (const row of document.querySelectorAll('[data-index-mod]')) {
     const body = row.querySelector('.post-body');
     const subject = row.querySelector('.post-subject');
+    const name = row.querySelector('.mod-name');
     const button = row.querySelector('.post-more');
     const expanded = row.classList.contains('is-expanded');
     body.style.webkitLineClamp = 'unset';
@@ -94,7 +95,7 @@ function fitPostPreviews() {
     button.setAttribute('aria-expanded', String(expanded));
     button.hidden = !expanded;
     if (expanded) continue;
-    const overflows = body.scrollHeight > body.clientHeight + 1 || subject.scrollHeight > subject.clientHeight + 1;
+    const overflows = body.scrollHeight > body.clientHeight + 1 || subject.scrollHeight > subject.clientHeight + 1 || name.scrollHeight > name.clientHeight + 1;
     if (overflows) {
       button.hidden = false;
       const lineHeight = parseFloat(getComputedStyle(body).lineHeight);
@@ -153,14 +154,18 @@ async function editorPage(id, current) {
     navigate(`/mod/${saved.id}`);
   });
 }
+function releaseHistory(releases) {
+  if (!releases.length) return '';
+  return `<details class="release-history"><summary>Post history (${releases.length})</summary><ol>${releases.map(r => `<li><div class="history-heading">${link(r.source_url, r.version)} · <time datetime="${new Date(r.posted_at * 1000).toISOString()}">${date(r.posted_at)}</time></div><p>${esc(r.short_description)}</p>${r.description ? `<div class="description">${esc(r.description)}</div>` : ''}<ul class="downloads">${r.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul></li>`).join('')}</ol></details>`;
+}
 async function detailPage(id, current) {
-  const m = await api(`/api/mods/${id}`); if (current !== routeVersion) return;
+  const [m, releases] = await Promise.all([api(`/api/mods/${id}`), api(`/api/mods/${id}/history`)]); if (current !== routeVersion) return;
   const u = session.user, owner = u && (m.user_id === u.id || u.role === 'admin');
   const hasScreenshot = m.image_url?.startsWith('/uploads/');
   const displayImage = hasScreenshot ? m.image_url : DEFAULT_MOD_IMAGE;
   const imageAlt = hasScreenshot ? `${m.name} screenshot` : 'Home: Equestria icon';
   document.title = `${m.name} — Home: Equestria mods`;
-  view.innerHTML = `<section class="panel"><div class="detail-header"><h2>${esc(m.name)}${badge(m)}</h2><span>${esc(m.version)}</span></div><p class="detail-meta">${esc(m.author)} · Added ${date(m.created_at)} · Updated ${date(m.updated_at)}${m.game_version ? ` · Home: Equestria ${esc(m.game_version)}` : ''}</p><p>${esc(m.short_description)}</p><div class="actions">${m.repository_url ? link(m.repository_url, 'Repository') : ''}${m.source_url ? link(m.source_url, 'Source post') : ''}${votes(m)}${owner ? `<a href="/mod/${m.id}/edit" data-nav>Edit</a><button class="link-button danger" data-delete-mod="${m.id}">Remove</button>` : ''}</div><h3 class="section-title">Downloads</h3><ul class="downloads">${m.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul><a href="${esc(displayImage)}" target="_blank" rel="noopener"><img class="screenshot" src="${esc(displayImage)}" alt="${esc(imageAlt)}" loading="lazy"></a>${m.description ? `<div class="description">${esc(m.description)}</div>` : ''}${m.approval !== 'none' ? `<p class="muted">${m.approval === 'current' ? 'Approved' : 'Earlier release approved'} by ${esc(m.approved_by)} · ${date(m.approved_at)}</p>` : ''}${u?.role === 'reviewer' ? `<div class="actions"><button data-approve="true" data-revision="${m.revision}" data-id="${m.id}">Approve this release</button>${m.approval !== 'none' ? `<button data-approve="false" data-revision="${m.revision}" data-id="${m.id}">Clear check</button>` : ''}</div>` : ''}</section>`;
+  view.innerHTML = `<section class="panel"><div class="detail-header"><h2>${esc(m.name)}${badge(m)}</h2><span>${esc(m.version)}</span></div><p class="detail-meta">${esc(m.author)} · Added ${date(m.created_at)} · Updated ${date(m.updated_at)}${m.game_version ? ` · Home: Equestria ${esc(m.game_version)}` : ''}</p><p>${esc(m.short_description)}</p><div class="actions">${m.repository_url ? link(m.repository_url, 'Repository') : ''}${m.source_url ? link(m.source_url, 'Source post') : ''}${votes(m)}${owner ? `<a href="/mod/${m.id}/edit" data-nav>Edit</a><button class="link-button danger" data-delete-mod="${m.id}">Remove</button>` : ''}</div><h3 class="section-title">Downloads</h3><ul class="downloads">${m.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul><a href="${esc(displayImage)}" target="_blank" rel="noopener"><img class="screenshot" src="${esc(displayImage)}" alt="${esc(imageAlt)}" loading="lazy"></a>${m.description ? `<div class="description">${esc(m.description)}</div>` : ''}${releaseHistory(releases)}${m.approval !== 'none' ? `<p class="muted">${m.approval === 'current' ? 'Approved' : 'Earlier release approved'} by ${esc(m.approved_by)} · ${date(m.approved_at)}</p>` : ''}${u?.role === 'reviewer' ? `<div class="actions"><button data-approve="true" data-revision="${m.revision}" data-id="${m.id}">Approve this release</button>${m.approval !== 'none' ? `<button data-approve="false" data-revision="${m.revision}" data-id="${m.id}">Clear check</button>` : ''}</div>` : ''}</section>`;
 }
 async function accountPage(current) {
   if (!needUser()) return;

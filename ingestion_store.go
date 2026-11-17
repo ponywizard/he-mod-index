@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 )
 
@@ -484,11 +483,15 @@ func (a *app) publishCandidate(ctx context.Context, id, owner int64, actor *iden
 			return 0, problem(409, "Source appears to downgrade the version; review this update.")
 		}
 		in.ImageURL = old.ImageURL
+		// Keep the established overview until the history-based summary is ready.
+		// Per-release notes stay in the immutable published candidate payload.
+		in.ShortDescription = old.ShortDescription
+		in.Description = old.Description
 	}
 	downloads, _ := json.Marshal(in.Downloads)
-	now := time.Now().Unix()
+	postedAt := c.Source.Time
 	if modID == 0 {
-		result, err := tx.Exec(`INSERT INTO mods(user_id,name,version,game_version,download_url,downloads_json,repository_url,short_description,description,image_url,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'',?,?)`, owner, in.Name, in.Version, in.GameVersion, in.DownloadURL, string(downloads), in.RepositoryURL, in.ShortDescription, in.Description, now, now)
+		result, err := tx.Exec(`INSERT INTO mods(user_id,name,version,game_version,download_url,downloads_json,repository_url,short_description,description,image_url,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'',?,?)`, owner, in.Name, in.Version, in.GameVersion, in.DownloadURL, string(downloads), in.RepositoryURL, in.ShortDescription, in.Description, postedAt, postedAt)
 		if err != nil {
 			return 0, err
 		}
@@ -501,7 +504,7 @@ func (a *app) publishCandidate(ctx context.Context, id, owner int64, actor *iden
 		if old.Version != in.Version || !sameReleaseDownloads(old.Downloads, in.Downloads) {
 			bump = 1
 		}
-		_, err = tx.Exec(`UPDATE mods SET name=?,version=?,game_version=?,download_url=?,downloads_json=?,repository_url=?,short_description=?,description=?,updated_at=?,revision=revision+? WHERE id=?`, in.Name, in.Version, in.GameVersion, in.DownloadURL, string(downloads), in.RepositoryURL, in.ShortDescription, in.Description, now, bump, modID)
+		_, err = tx.Exec(`UPDATE mods SET name=?,version=?,game_version=?,download_url=?,downloads_json=?,repository_url=?,short_description=?,description=?,updated_at=?,revision=revision+? WHERE id=?`, in.Name, in.Version, in.GameVersion, in.DownloadURL, string(downloads), in.RepositoryURL, in.ShortDescription, in.Description, postedAt, bump, modID)
 		if err != nil {
 			return 0, err
 		}
@@ -516,6 +519,9 @@ func (a *app) publishCandidate(ctx context.Context, id, owner int64, actor *iden
 	}
 	_, err = tx.Exec("UPDATE ingest_candidates SET state='published',mod_id=? WHERE id=?", modID, id)
 	if err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(`UPDATE mods SET created_at=(SELECT MIN(p.posted_at) FROM ingest_candidates c JOIN ingest_posts p ON p.id=c.post_id WHERE c.mod_id=? AND c.state='published') WHERE id=?`, modID, modID); err != nil {
 		return 0, err
 	}
 	return modID, tx.Commit()

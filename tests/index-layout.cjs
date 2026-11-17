@@ -44,7 +44,7 @@ function call(method, params = {}, sessionId) {
 const timestamp = 1794700800;
 const mods = [
   {id: 1, name: 'Breeze TTS', author: 'ponywizard', short_description: 'Companion voices and speech', description: ('Installation instructions and voice configuration.\n').repeat(45) + '<img src=x onerror="window.unsafe=true"> unique-search-word', thumbnail_url: '/uploads/test.jpg', rating: 12},
-  {id: 2, name: 'A mod with a deliberately long name that wraps beyond the first line', author: 'Anonymous', short_description: ('A longer subject with useful details ').repeat(6), description: 'A short body.', thumbnail_url: '', rating: -2},
+  {id: 2, name: 'A mod with a deliberately long name that wraps beyond the first line', author: 'Anonymous', short_description: ('A longer subject with useful details ').repeat(12), description: 'A short body.', thumbnail_url: '', rating: -2},
   {id: 3, name: 'Simple mod', author: 'mod_author', short_description: 'A short subject', description: 'A short description that fits.', thumbnail_url: '/uploads/test.jpg', rating: 0},
   {id: 4, name: 'No image', author: 'Anonymous', short_description: 'No long description', description: '', thumbnail_url: '', rating: 4},
 ].map(m => ({user_id: 1, revision: 1, version: '1.2.0', game_version: '0.3.0-maredev', created_at: timestamp, updated_at: timestamp + m.id, approval: 'none', upvotes: 0, downvotes: 0, my_vote: 0, downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}], image_url: m.thumbnail_url ? '/uploads/test.jpg' : '', ...m}));
@@ -87,6 +87,7 @@ async function screenshot(name) {
     else if (url.pathname === '/api/admin/import-errors') body = Buffer.from('[]');
     else if (url.pathname === '/api/admin/imports') body = Buffer.from(JSON.stringify(pendingImport ? [importFixture] : []));
     else if (url.pathname === '/api/admin/imports/10') {publishedImport = JSON.parse(request.request.postData); pendingImport = false; body = Buffer.from('{"id":1,"warning":""}');}
+    else if (/^\/api\/mods\/\d+\/history$/.test(url.pathname)) body = Buffer.from(JSON.stringify([{version: '1.0', posted_at: timestamp, source_url: 'https://desuarchive.org/mlp/thread/1/#2', short_description: 'Original release', description: '<img src=x onerror="window.unsafe=true"> Historical notes', downloads: mods[0].downloads}]));
     else if (url.pathname === '/api/mods') body = Buffer.from(JSON.stringify(mods));
     else if (/^\/api\/mods\/\d+$/.test(url.pathname)) body = Buffer.from(JSON.stringify(mods.find(m => m.id === Number(url.pathname.split('/').pop()))));
     else if (/^\/uploads\//.test(url.pathname)) {body = image; type = 'image/png';}
@@ -101,11 +102,15 @@ async function screenshot(name) {
   await until("document.querySelector('[data-index-mod=\"4\"] .thumbnail').naturalWidth === 256");
   assert.equal(await evaluate("document.querySelector('[data-index-mod=\"4\"] .thumbnail').getAttribute('src')"), '/default-mod.png');
   assert.equal(await evaluate("document.querySelector('[data-index-mod=\"3\"] .thumbnail').getAttribute('src')"), '/uploads/test.jpg');
-  assert.deepEqual(await evaluate("[...document.querySelectorAll('thead button')].map(el => el.textContent.replace(/[ ↑↓]/g, ''))"), ['Name', 'Description', 'Rating', 'Added', 'Updated']);
+  assert.deepEqual(await evaluate("[...document.querySelectorAll('thead button')].map(el => el.textContent.replace(/[ ↑↓]/g, ''))"), ['Description', 'Rating', 'Added', 'Updated']);
+  assert.equal(await evaluate("document.querySelector('thead th').textContent"), '');
+  assert.equal(await evaluate("document.querySelectorAll('.mod-image-cell .mod-name').length"), 0);
+  assert.equal(await evaluate("document.querySelectorAll('.description-cell .mod-name').length"), 4);
+  assert.equal(await evaluate("document.querySelector('thead button').dataset.sort"), 'name');
   const heights = await evaluate("[...document.querySelectorAll('[data-index-mod]')].map(row => row.getBoundingClientRect().height)");
   assert(Math.max(...heights) - Math.min(...heights) < 1, `Description changed row height: ${heights}`);
   assert(heights[0] < 180, `Collapsed rows are too tall: ${heights}`);
-  assert.equal(await evaluate("document.querySelector('.mod-title-cell .post-author')"), null);
+  assert.equal(await evaluate("document.querySelector('.mod-image-cell .post-author')"), null);
   assert.equal(await evaluate("getComputedStyle(document.querySelector('.post-author')).color"), 'rgb(17, 119, 67)');
   assert.equal(await evaluate("getComputedStyle(document.querySelector('.post-subject')).fontWeight"), '700');
   assert(await evaluate("document.querySelector('.post-version').getBoundingClientRect().left > document.querySelector('.post-author').getBoundingClientRect().right"));
@@ -141,6 +146,10 @@ async function screenshot(name) {
   await evaluate("document.querySelector('a.mod-name[href=\"/mod/4\"]').click()");
   await until("document.querySelector('.screenshot')?.naturalWidth === 256");
   assert.equal(await evaluate("document.querySelector('.screenshot').getAttribute('src')"), '/default-mod.png');
+  assert.equal(await evaluate("document.querySelector('.release-history summary').textContent"), 'Post history (1)');
+  await evaluate("document.querySelector('.release-history summary').click()");
+  assert.equal(await evaluate("document.querySelector('.release-history .description').textContent"), '<img src=x onerror="window.unsafe=true"> Historical notes');
+  assert.equal(await evaluate('window.unsafe'), undefined);
   await evaluate("document.querySelector('nav a[href=\"/submit\"]').click()");
   await until("Boolean(document.querySelector('#mod-form'))");
   assert.equal(await evaluate("document.querySelector('#image-editor legend').textContent"), 'Image (optional)');

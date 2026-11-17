@@ -34,25 +34,25 @@ func parseIngest(args []string, out io.Writer) (ingestOptions, error) {
 	fs := flag.NewFlagSet("ingest", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.BoolVar(&o.evalExtract, "extract", false, "evaluate extraction instead of classification")
-	fs.StringVar(&o.extractModel, "extract-model", "gpt-5.4-mini", "model for descriptions, links and screenshots")
+	fs.StringVar(&o.extractModel, "extract-model", "gpt-5.4-mini", "model for extraction and history-based descriptions")
 	fs.StringVar(&o.model, "model", "gpt-6-luna", "OpenAI model with verified price")
 	fs.StringVar(&o.envFile, "env-file", "", "read only OPENAI_KEY/API_KEY from this file")
 	fs.StringVar(&o.start, "start", "2026-08-07", "archive search start (YYYY-MM-DD)")
 	fs.StringVar(&o.sources, "sources", "", "read saved archive JSON files from a directory")
 	fs.StringVar(&o.from, "from", "", "staging SQLite database for merge")
 	fs.StringVar(&o.labels, "labels", "", "eval JSON: array of {post_id,release}")
-	fs.Int64Var(&o.owner, "owner", 0, "existing admin account ID for automatic publication (0 stages only)")
+	fs.Int64Var(&o.owner, "owner", 0, "existing admin owner ID (0 stages only, or summarizes all imported listings)")
 	fs.Float64Var(&o.budget, "budget", 5, "cumulative API spending cap in USD for this database")
 	fs.BoolVar(&o.collectOnly, "collect-only", false, "collect source posts without API calls or publication")
 	fs.Usage = func() {
-		fmt.Fprintln(out, "Usage: he-mod-index ingest hydrate|poll|process|status|eval|merge [flags]\nUses DATA_DIR. hydrate collects archive threads; poll discovers and reads live threads.\nprocess resumes saved work; eval measures classifier recall/precision on labeled posts.")
+		fmt.Fprintln(out, "Usage: he-mod-index ingest hydrate|poll|process|status|eval|merge|summarize [flags]\nUses DATA_DIR. hydrate collects archive threads; poll discovers and reads live threads.\nprocess resumes saved work; eval measures classifier recall/precision on labeled posts.")
 		fs.PrintDefaults()
 	}
 	if o.command == "--help" || o.command == "-h" {
 		fs.Usage()
 		return o, flag.ErrHelp
 	}
-	if o.command != "hydrate" && o.command != "poll" && o.command != "process" && o.command != "status" && o.command != "eval" && o.command != "merge" {
+	if o.command != "hydrate" && o.command != "poll" && o.command != "process" && o.command != "status" && o.command != "eval" && o.command != "merge" && o.command != "summarize" {
 		return o, errors.New("unknown ingest command; use ingest --help")
 	}
 	if err := fs.Parse(args[1:]); err != nil {
@@ -364,6 +364,16 @@ func (a *app) runIngest(ctx context.Context, o ingestOptions, out io.Writer) err
 			return errors.New("--owner must identify an existing admin account")
 		}
 	}
+	if o.command == "summarize" {
+		c, err := newModelClient(a, o.extractModel, int64(o.budget*1e6), o.envFile)
+		if err != nil {
+			return err
+		}
+		if err = a.summarizePending(ctx, c, o.owner); err != nil {
+			return err
+		}
+		return a.ingestionStatus(out)
+	}
 	if o.command == "merge" {
 		if err = a.mergeIngestion(ctx, o.from); err != nil {
 			return err
@@ -407,6 +417,9 @@ func (a *app) runIngest(ctx context.Context, o ingestOptions, out io.Writer) err
 	}
 	if o.owner > 0 {
 		if err = a.publishPending(ctx, o.owner); err != nil {
+			return err
+		}
+		if err = a.summarizePending(ctx, extractor, o.owner); err != nil {
 			return err
 		}
 	}

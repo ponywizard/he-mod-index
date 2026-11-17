@@ -8,6 +8,10 @@ Do not register accounts or call write endpoints as part of this workflow.
 
 - `GET /api/mods` returns a JSON array of listings, newest updated first.
 - `GET /api/mods/{id}` returns one listing; an unknown ID returns HTTP 404.
+- `GET /api/mods/{id}/history` returns published source entries, newest first.
+  Each entry has `post_id`, `posted_at`, `source_url`, `name`, `version`,
+  `short_description`, `description`, and `downloads`. Held imports are excluded.
+  Listings without imported history return an empty array; unknown IDs return 404.
 - `GET /feed.xml` returns RSS 2.0 with the 100 most recently updated listings.
 - `GET /api/site` returns `current_thread`, the current thread URL.
 - `/mod/{id}` is the human-readable listing page.
@@ -16,7 +20,12 @@ Listings contain `id`, `name`, `version`, `game_version`, `short_description`,
 `description`, `downloads` (ordered `filename`/`url` pairs), `repository_url`,
 `image_url`, `thumbnail_url`, `created_at`, `updated_at`, and `revision`.
 `source_url`, when present, links to the announcement on 4chan or Desuarchive.
-Imported listings may be unreviewed. Timestamps are Unix seconds. Descriptions are plain text. `download_url` is a
+Imported listings may be unreviewed. Timestamps are Unix seconds. For imported
+listings, `created_at` is the earliest accepted source post date and `updated_at`
+is the latest; editing descriptions or images does not change these dates.
+Manually created listings use their index creation/edit dates. Imported descriptions
+summarize the accepted history; individual release notes remain in `/history`.
+Descriptions are plain text. `download_url` is a
 legacy alias for the first download. Empty image fields use the site's default
 icon; screenshots and square thumbnails are served locally.
 

@@ -112,6 +112,7 @@ func (a *app) routes() http.Handler {
 	m.HandleFunc("GET /api/site", a.handle(a.publicSite))
 	m.HandleFunc("GET /feed.xml", a.handle(a.feed))
 	m.HandleFunc("GET /api/mods/{id}", a.handle(a.getMod))
+	m.HandleFunc("GET /api/mods/{id}/history", a.handle(a.getModHistory))
 	m.HandleFunc("POST /api/mods", a.handle(a.createMod))
 	m.HandleFunc("PUT /api/mods/{id}", a.handle(a.updateMod))
 	m.HandleFunc("DELETE /api/mods/{id}", a.handle(a.deleteMod))

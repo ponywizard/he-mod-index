@@ -56,8 +56,8 @@ func (a *app) mergeIngestion(ctx context.Context, path string) error {
 	if err = source.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version != schemaVersion {
-		return fmt.Errorf("staging schema %d must match %d", version, schemaVersion)
+	if version < 6 || version > schemaVersion {
+		return fmt.Errorf("staging schema %d is unsupported (maximum %d)", version, schemaVersion)
 	}
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
