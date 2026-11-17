@@ -6,13 +6,13 @@
 table.index{table-layout:fixed;min-width:840px}
 .index-image{width:120px}.index-rating{width:100px}.index-date{width:116px}
 .image-content{height:140px}
-.name-heading{display:flex;align-items:flex-start;min-width:0;flex-shrink:0}
-.name-heading .mod-name{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;line-height:19px}
+.name-heading{display:flex;align-items:baseline;min-width:0;flex-shrink:0}
+.name-heading .mod-name{display:block;min-width:0;max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:20px}
 .name-heading .approval{flex:none;line-height:19px}
 .image-content .thumbnail-link{margin:0;flex:none}
 .description-cell{position:relative}
 .post-preview{position:absolute;inset:10px 12px;display:flex;flex-direction:column;min-height:0}
-.post-header{display:flex;align-items:baseline;gap:10px;white-space:nowrap;min-height:20px;flex-shrink:0;overflow:hidden}
+.post-header{display:flex;align-items:baseline;gap:10px;white-space:nowrap;min-width:0;min-height:20px;flex:0 1 auto;margin-left:10px;overflow:hidden}
 .post-author{font-weight:700;color:#117743;max-width:50%;overflow:hidden;text-overflow:ellipsis}
 .post-version{font-size:12px;color:#626e85;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .post-subject{font-weight:700;color:#0f0c5d;line-height:19px;flex-shrink:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;margin:1px 0 4px}
@@ -20,7 +20,7 @@ table.index{table-layout:fixed;min-width:840px}
 .post-more{align-self:flex-start;flex-shrink:0;line-height:19px;font-size:12px;margin-top:3px}
 .is-expanded .post-preview{position:static;min-height:140px}
 .is-expanded .post-body{display:block;flex:0 0 auto;overflow:visible}
-.is-expanded .post-subject,.is-expanded .mod-name{-webkit-line-clamp:unset}
+.is-expanded .post-subject{-webkit-line-clamp:unset}
 @media(max-width:700px){.index .mod-image-cell{min-width:0}.post-preview{inset:9px 8px}}
 
 .release-history{clear:both;margin-top:18px}.release-history>summary{cursor:pointer;color:#34345c;font-weight:700}.release-history>ol{list-style:none;padding:0}.release-history>ol>li{border-top:1px solid #b7c5d9;padding:12px 0}.history-heading{font-size:13px;color:#626e85}.release-history p{margin:6px 0}.release-history .description{margin:6px 0}
