@@ -33,6 +33,10 @@
 - Preserve published source history. Imported Added/Updated dates belong to the
   earliest/latest accepted posts. Overview synthesis uses that history, preserves
   manual edits and release checks, and never advances source dates or revisions.
+- History-only acceptance requires an admin session and preserves the current
+  release, ownership, approval, cover, and automatic-update provenance. Rebuild
+  generated overviews after history changes; reject model output based on stale
+  history and preserve manually edited descriptions.
 - Keep gallery images attached to their published source entry and version; do not
   infer provenance from the latest mod version or an arbitrary manual cover.
   Retain historical images on automatic updates; remove all files on mod/user

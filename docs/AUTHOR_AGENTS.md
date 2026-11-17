@@ -12,6 +12,8 @@ Do not register accounts or call write endpoints as part of this workflow.
   Each entry has `post_id`, `posted_at`, `source_url`, `name`, `version`,
   `short_description`, `description`, and `downloads`. Held imports are excluded.
   Listings without imported history return an empty array; unknown IDs return 404.
+  A post may be accepted as history without becoming the current release. Use
+  `/api/mods/{id}` for the current version and downloads.
 - `GET /api/mods/{id}/images` returns retained thread images, newest first. Each
   has local `image_url` and `thumbnail_url`, a Desuarchive `source_url`, `post_id`,
   `posted_at`, `version`, and a plain-text `description` from its announcement.
@@ -28,7 +30,7 @@ Listings contain `id`, `name`, `version`, `game_version`, `short_description`,
 Imported listings may be unreviewed. Timestamps are Unix seconds. For imported
 listings, `created_at` is the earliest accepted source post date and `updated_at`
 is the latest; editing descriptions or images does not change these dates.
-Manually created listings use their index creation/edit dates. Imported descriptions
+Listings without accepted source history use their index creation/edit dates. Imported descriptions
 summarize the accepted history; individual release notes remain in `/history`.
 Descriptions are plain text. `download_url` is a
 legacy alias for the first download. Empty index thumbnails use the site's default

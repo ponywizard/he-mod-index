@@ -122,7 +122,7 @@ func TestOverviewUsesPublishedHistoryAndKeepsSourceDates(t *testing.T) {
 }
 
 func TestOverviewRejectsConcurrentChanges(t *testing.T) {
-	for _, change := range []string{"manual edit", "new source", "owner role"} {
+	for _, change := range []string{"manual edit", "new source", "owner role", "older history"} {
 		t.Run(change, func(t *testing.T) {
 			a := testApp(t)
 			owner := client(a, "192.0.2.1").provision(t, "operator", "admin")
@@ -133,6 +133,10 @@ func TestOverviewRejectsConcurrentChanges(t *testing.T) {
 				t.Fatal(err)
 			}
 			before, _ := a.readMod(id, 0)
+			history, err := readModHistory(context.Background(), a.db, id)
+			if err != nil {
+				t.Fatal(err)
+			}
 			switch change {
 			case "manual edit":
 				_, err = a.db.Exec("UPDATE mods SET description='Manual correction' WHERE id=?", id)
@@ -141,11 +145,14 @@ func TestOverviewRejectsConcurrentChanges(t *testing.T) {
 				_, err = a.publishCandidate(context.Background(), next.ID, owner.ID, nil, nil, 0)
 			case "owner role":
 				_, err = a.db.Exec("UPDATE users SET role='user' WHERE id=?", owner.ID)
+			case "older history":
+				old := seedCandidate(t, a, 39999999, e)
+				_, err = a.db.Exec("UPDATE ingest_candidates SET state='published',mod_id=? WHERE id=?", id, old.ID)
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err = a.saveOverview(context.Background(), before, c.PostID, modOverview{"Overview", "Should not save"}); err == nil {
+			if err = a.saveOverview(context.Background(), before, c.PostID, historyFingerprint(history), modOverview{"Overview", "Should not save"}); err == nil {
 				t.Fatal("saved stale model output")
 			}
 			got, _ := a.readMod(id, 0)

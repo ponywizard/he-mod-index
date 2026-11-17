@@ -167,6 +167,10 @@ overview with new entries; long histories are folded in chronological chunks.
 Release notes and old downloads remain in history. Held candidates are excluded.
 Overview, image, and manual metadata edits do not change source dates, release
 revisions, or approval status. Manual corrections stop automatic overview edits.
+Accepting an older post with **Add to history** queues a full rebuild of an
+automatically maintained overview, so the earlier context is included. Manually
+maintained descriptions stay unchanged. A concurrent history change discards an
+incomplete model result and leaves the rebuild pending.
 
 Polling and `ingest process --owner 123` refresh pending overviews after publication.
 After an API-free merge, or to summarize existing imports without processing new
@@ -222,10 +226,21 @@ Clear candidates publish as unreviewed listings owned by the configured admin.
 Automatic updates require a matching repository/name, the same download set, or
 an explicit prior announcement, and a newer source. Name-only matches, existing
 user-owned listings, and manually edited imports wait in **Admin → Pending
-imports**. Choose a new listing or an existing target to merge, or dismiss the
-candidate. Manual merge preserves the target's ownership; listings owned by a
-different account continue to require manual merging. Inspect the source and
-description before publishing. Model refusals/invalid extraction appear in
+imports**. Inspect the post date, source, description, and download links, then:
+
+- **Create listing** publishes a separate mod.
+- **Update listing** publishes the post as the selected mod's current release,
+  replacing its version and download details. Posts at or before the current
+  release's source date are rejected; use Add to history for those.
+- **Add to history** attaches the post and its source images to an existing mod
+  without changing the current release, cover, ownership, or approval. It accepts
+  older posts and updates Added/Updated from the accepted post dates. It also
+  works on manually submitted or edited listings without enabling automatic edits.
+- **Dismiss** removes an irrelevant or redundant candidate from the queue.
+
+Import acceptance does not award a release approval check. Manual updates preserve
+the target's ownership; listings owned by a different account continue to require
+manual resolution. Model refusals/invalid extraction appear in
 **Import errors**, where Retry queues another attempt on the next run. API or
 network failures leave unprocessed work durable for a later run. Image failures
 keep the listing and its previous/default image; use Edit to retry the image.

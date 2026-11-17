@@ -55,7 +55,7 @@ let session;
 let fixtureUser = {id: 1, username: 'owner', role: 'user'};
 let pendingImport = true;
 let publishedImport = null;
-const importFixture = {id: 10, reason: 'Confirm the matching listing.', source: {url: 'https://desuarchive.org/mlp/thread/1/#2', text: '<img src=x onerror="window.unsafe=true"> Source post'}, entry: {name: 'Imported mod', version: '2.0', short_description: 'A discovered mod.', description: 'Install the package.', downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}]}};
+const importFixture = {id: 10, reason: 'Confirm the matching listing.', source: {time: timestamp - 1000, url: 'https://desuarchive.org/mlp/thread/1/#2', text: '<img src=x onerror="window.unsafe=true"> Source post'}, entry: {name: 'Imported mod', version: '2.0', short_description: 'A discovered mod.', description: 'Install the package.', downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}]}};
 async function evaluate(expression) {
   const result = await call('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}, session);
   if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails));
@@ -216,9 +216,30 @@ async function screenshot(name) {
   await call('Page.navigate', {url: 'http://he-mod-index.test/admin'}, session);
   await until("Boolean(document.querySelector('[data-import-publish]'))");
   assert.equal(await evaluate('window.unsafe'), undefined);
-  await evaluate("document.querySelector('[data-import-target]').value = '1'; document.querySelector('[data-import-publish]').click()");
+  assert.equal(await evaluate("document.querySelector('[data-import-publish]').textContent"), 'Create listing');
+  assert.equal(await evaluate("document.querySelector('[data-import-history]').hidden"), true);
+  assert.equal(await evaluate("document.querySelector('[data-import]').textContent.includes('Publish unreviewed')"), false);
+  assert.equal(await evaluate("document.querySelector('[data-import]').textContent.includes('Invalid Date')"), false);
+  await evaluate("const select = document.querySelector('[data-import-target]'); select.value = '1'; select.dispatchEvent(new Event('change', {bubbles:true}))");
+  assert.equal(await evaluate("document.querySelector('[data-import-publish]').textContent"), 'Update listing');
+  assert.equal(await evaluate("document.querySelector('[data-import-history]').hidden"), false);
+  assert.equal(await evaluate("document.querySelector('[data-import-current] a').getAttribute('href')"), '/mod/1');
+  await screenshot('imports-desktop.png');
+  await call('Emulation.setDeviceMetricsOverride', {width: 390, height: 844, deviceScaleFactor: 1, mobile: true}, session);
+  assert(await evaluate("document.querySelector('[data-import-target]').getBoundingClientRect().right <= document.querySelector('[data-import]').getBoundingClientRect().right"), 'Import selector overflows its panel on mobile');
+  await screenshot('imports-mobile.png');
+  await evaluate("document.querySelector('[data-import-publish]').click()");
   await until("!document.querySelector('[data-import-publish]')");
   assert.deepEqual(publishedImport, {action: 'publish', target_id: 1, revision: 1});
+  for (const [action, selector, target] of [['history', 'history', 1], ['publish', 'publish', 0], ['reject', 'reject', 0]]) {
+    pendingImport = true;
+    await call('Page.navigate', {url: 'http://he-mod-index.test/admin'}, session);
+    await until("Boolean(document.querySelector('[data-import-publish]'))");
+    await evaluate(`document.querySelector('[data-import-target]').value = '${target}'; document.querySelector('[data-import-target]').dispatchEvent(new Event('change', {bubbles:true})); document.querySelector('[data-import-${selector}]').click()`);
+    await until("!document.querySelector('[data-import-publish]')");
+    assert.deepEqual(publishedImport, {action, target_id: target, revision: target ? 1 : 0});
+    assert.equal(await evaluate("document.querySelector('#message').className"), 'success');
+  }
   assert.deepEqual(errors, [], `Browser errors: ${errors.join('\n')}`);
   console.log(`Browser checks passed: column order, post styling, equal collapsed row heights (${heights[0]}px desktop), text truncation, Show more/less, sorting, full-text filtering, escaped content, mobile scrolling, local fallback images, optional image input, anonymous navigation, admin import resolution, image galleries, source captions, viewer navigation, and slideshow cleanup.`);
 })().catch(error => {console.error(error); process.exitCode = 1;}).finally(async () => {

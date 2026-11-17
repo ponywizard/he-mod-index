@@ -60,6 +60,18 @@ func readModHistory(ctx context.Context, db historyReader, id int64) ([]modHisto
 	}
 	return list, rows.Err()
 }
+
+func historyFingerprint(history []modHistoryEntry) string {
+	text := make([]string, len(history))
+	for i, entry := range history {
+		text[i] = entry.sourceText
+	}
+	b, _ := json.Marshal(struct {
+		History []modHistoryEntry
+		Text    []string
+	}{history, text})
+	return digest(string(b))
+}
 func (a *app) getModHistory(w http.ResponseWriter, r *http.Request) error {
 	if _, err := a.authenticate(r); err != nil {
 		return err
@@ -167,9 +179,9 @@ func (a *app) summarizeMod(ctx context.Context, c *modelClient, id, owner int64)
 		}
 		pending = pending[end:]
 	}
-	return a.saveOverview(ctx, before, postID, overview)
+	return a.saveOverview(ctx, before, postID, historyFingerprint(history), overview)
 }
-func (a *app) saveOverview(ctx context.Context, before mod, postID int64, overview modOverview) error {
+func (a *app) saveOverview(ctx context.Context, before mod, postID int64, historyHash string, overview modOverview) error {
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -190,6 +202,13 @@ func (a *app) saveOverview(ctx context.Context, before mod, postID int64, overvi
 	}
 	if current.UserID != before.UserID || role != "admin" || latest != postID || fp != fingerprint(before) || fingerprint(current) != fingerprint(before) {
 		return problem(409, "Mod changed during overview generation.")
+	}
+	history, err := readModHistory(ctx, tx, before.ID)
+	if err != nil {
+		return err
+	}
+	if historyFingerprint(history) != historyHash {
+		return problem(409, "History changed during overview generation.")
 	}
 	if _, err = tx.Exec("UPDATE mods SET short_description=?,description=? WHERE id=?", overview.ShortDescription, overview.Description, before.ID); err != nil {
 		return err

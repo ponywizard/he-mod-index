@@ -289,7 +289,11 @@ func (a *app) updateMod(w http.ResponseWriter, r *http.Request) error {
 		return problem(409, "Mod changed. Reload and try again.")
 	}
 	updatedAt := time.Now().Unix()
-	if old.SourceURL != "" {
+	var hasHistory bool
+	if err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM ingest_candidates WHERE mod_id=? AND state='published')", old.ID).Scan(&hasHistory); err != nil {
+		return err
+	}
+	if old.SourceURL != "" || hasHistory {
 		updatedAt = old.UpdatedAt
 	}
 	release := old.Version != in.Version || !sameReleaseDownloads(old.Downloads, in.Downloads)

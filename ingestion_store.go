@@ -471,7 +471,7 @@ func (a *app) publishCandidate(ctx context.Context, id, owner int64, actor *iden
 			return 0, err
 		}
 		if priorTime >= c.Source.Time {
-			return 0, problem(409, "An equal or newer source is already indexed.")
+			return 0, problem(409, "An equal or newer release post is already indexed. Use Add to history to keep this post without replacing the current release.")
 		}
 		if target == nil && (old.UserID != owner || priorFingerprint != fingerprint(old)) {
 			return 0, problem(409, "Listing was edited manually; review this update.")
@@ -521,7 +521,7 @@ func (a *app) publishCandidate(ctx context.Context, id, owner int64, actor *iden
 	if err != nil {
 		return 0, err
 	}
-	if _, err = tx.Exec(`UPDATE mods SET created_at=(SELECT MIN(p.posted_at) FROM ingest_candidates c JOIN ingest_posts p ON p.id=c.post_id WHERE c.mod_id=? AND c.state='published') WHERE id=?`, modID, modID); err != nil {
+	if err = refreshSourceDates(ctx, tx, modID); err != nil {
 		return 0, err
 	}
 	return modID, tx.Commit()
@@ -591,12 +591,22 @@ func (a *app) resolveCandidate(w http.ResponseWriter, r *http.Request) error {
 		}
 		return writeJSON(w, 200, map[string]bool{"ok": true})
 	}
-	if in.Action != "publish" || in.TargetID < 0 {
-		return problem(400, "Use publish or reject with a nonnegative target_id.")
+	if (in.Action != "publish" && in.Action != "history") || in.TargetID < 0 || in.Action == "history" && in.TargetID == 0 {
+		return problem(400, "Choose publish, history for an existing listing, or reject.")
 	}
 	c, err := candidateFrom(a.db.QueryRow(candidateSelect+" WHERE c.id=?", id))
 	if err != nil {
 		return err
+	}
+	if in.Action == "history" {
+		if err = a.acceptCandidateHistory(r.Context(), id, in.TargetID, in.Revision, i); err != nil {
+			return err
+		}
+		warning := ""
+		if err = a.retainCandidateImage(r.Context(), c, in.TargetID, i.User.ID, &i, false); err != nil {
+			warning = "History saved; source image could not be imported."
+		}
+		return writeJSON(w, 200, map[string]any{"id": in.TargetID, "warning": warning})
 	}
 	modID, err := a.publishCandidate(r.Context(), id, i.User.ID, &i, &in.TargetID, in.Revision)
 	if err != nil {

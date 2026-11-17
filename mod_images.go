@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -100,11 +101,15 @@ func (a *app) retainCandidateImage(ctx context.Context, c importCandidate, modID
 	if err != nil {
 		return err
 	}
+	// An admin accepting a particular history entry may add its gallery image to
+	// a manually maintained listing. This never changes its cover or source pointer.
+	explicitGallery := !cover && actor != nil && actor.User != nil && actor.User.Role == "admin" && actor.User.ID == owner
 	var beforeFingerprint string
-	if err = a.db.QueryRow("SELECT fingerprint FROM mod_sources WHERE mod_id=?", modID).Scan(&beforeFingerprint); err != nil {
+	err = a.db.QueryRow("SELECT fingerprint FROM mod_sources WHERE mod_id=?", modID).Scan(&beforeFingerprint)
+	if err != nil && !(explicitGallery && errors.Is(err, sql.ErrNoRows)) {
 		return err
 	}
-	if beforeFingerprint != fingerprint(old) {
+	if beforeFingerprint != fingerprint(old) && !explicitGallery {
 		if cover {
 			return problem(409, "Listing was edited manually; review this image.")
 		}
@@ -175,10 +180,11 @@ func (a *app) retainCandidateImage(ctx context.Context, c importCandidate, modID
 	}
 	var pid int64
 	var fp string
-	if err = tx.QueryRow("SELECT post_id,fingerprint FROM mod_sources WHERE mod_id=?", modID).Scan(&pid, &fp); err != nil {
+	err = tx.QueryRow("SELECT post_id,fingerprint FROM mod_sources WHERE mod_id=?", modID).Scan(&pid, &fp)
+	if err != nil && !(explicitGallery && errors.Is(err, sql.ErrNoRows)) {
 		return err
 	}
-	if cover && pid != c.PostID || fp != fingerprint(current) {
+	if cover && pid != c.PostID || !explicitGallery && fp != fingerprint(current) {
 		return problem(409, "Listing changed during image import.")
 	}
 	res, err := tx.Exec("INSERT INTO mod_images(candidate_id,mod_id,image_url,thumbnail_url) VALUES(?,?,?,?) ON CONFLICT(candidate_id) DO NOTHING", c.ID, modID, media.ImageURL, media.ThumbnailURL)

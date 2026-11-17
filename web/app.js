@@ -244,12 +244,25 @@ async function accountPage(current) {
   });
   wireForm('#password-form', async form => {await api('/api/password', {method: 'PUT', body: Object.fromEntries(new FormData(form))}); await refreshSession(); navigate('/login'); notice('Password changed. Sign in again.', true);});
 }
+function importCard(c, allMods) {
+  return `<section class="panel" data-import="${c.id}">
+    <h3>${esc(c.entry.name)} · ${esc(c.entry.version)}</h3>
+    <p class="muted">Posted ${date(c.source.time)} · ${link(c.source.url, 'Source post')}</p>
+    <p>${esc(c.reason)}</p><p>${esc(c.entry.short_description)}</p>
+    <details><summary>Description and source</summary><div class="description">${esc(c.entry.description)}</div><div class="description">${esc(c.source.text)}</div></details>
+    <ul>${c.entry.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul>
+    <label>Listing <select data-import-target><option value="0" data-revision="0">New listing</option>${allMods.map(m => `<option value="${m.id}" data-revision="${m.revision}" data-updated="${m.updated_at}">${esc(m.name)} · ${esc(m.version)}</option>`).join('')}</select></label>
+    <p class="muted" data-import-current hidden></p>
+    <div class="actions"><button data-import-publish="${c.id}">Create listing</button><button data-import-history="${c.id}" hidden>Add to history</button><button class="link-button danger" data-import-reject="${c.id}">Dismiss</button></div>
+    <p class="muted" data-import-help hidden>Add to history keeps the current release and cover. Update listing replaces release details.</p>
+  </section>`;
+}
 async function adminPage(current) {
   if (!needUser()) return;
   if (session.user.role !== 'admin') throw new Error('Admin access required.');
   const [users, allMods, imports, importErrors] = await Promise.all([api('/api/admin/users'), api('/api/mods'), api('/api/admin/imports'), api('/api/admin/import-errors')]); if (current !== routeVersion) return;
   const usernames = new Map(users.map(u => [u.id, u.username]));
-  view.innerHTML = `<h2>Admin</h2>${importErrors.length ? `<h3 class="section-title">Import errors</h3>${importErrors.map(p => `<section class="panel"><p>${link(p.source.url, `Post ${p.id}`)} · ${esc(p.reason)}</p><button data-import-retry="${p.id}">Retry next poll</button> <button class="link-button danger" data-import-dismiss="${p.id}">Dismiss</button></section>`).join('')}` : ''}<h3 class="section-title">Pending imports</h3>${imports.map(c => `<section class="panel" data-import="${c.id}"><h3>${esc(c.entry.name)} · ${esc(c.entry.version)}</h3><p>${esc(c.reason)}</p><p>${esc(c.entry.short_description)}</p><details><summary>Description and source</summary><div class="description">${esc(c.entry.description)}</div><p>${link(c.source.url, 'Source post')}</p><div class="description">${esc(c.source.text)}</div></details><ul>${c.entry.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul><label>Publish to <select data-import-target><option value="0" data-revision="0">New listing</option>${allMods.map(m => `<option value="${m.id}" data-revision="${m.revision}">${esc(m.name)} · ${esc(m.version)}</option>`).join('')}</select></label><div class="actions"><button data-import-publish="${c.id}">Publish unreviewed</button><button class="link-button danger" data-import-reject="${c.id}">Dismiss</button></div></section>`).join('') || '<p>No pending imports.</p>'}<h3 class="section-title">Users</h3><div class="scroll"><table><thead><tr><th>Username</th><th>Role</th><th>Registered</th><th>Mods</th><th>Votes</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td class="date">${date(u.created_at)}</td><td>${u.mods}</td><td>${u.votes}</td><td>${u.id !== session.user.id ? `<button class="link-button danger" data-delete-user="${u.id}" data-name="${esc(u.username)}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div><h3 class="section-title">Mods</h3><div class="scroll"><table><thead><tr><th>Name</th><th>Author</th><th></th></tr></thead><tbody>${allMods.map(m => `<tr><td><a href="/mod/${m.id}" data-nav>${esc(m.name)}</a></td><td>${esc(usernames.get(m.user_id) || m.author)}</td><td><button class="link-button danger" data-delete-mod="${m.id}">Remove</button></td></tr>`).join('') || '<tr><td colspan="3">No mods.</td></tr>'}</tbody></table></div>`;
+  view.innerHTML = `<h2>Admin</h2>${importErrors.length ? `<h3 class="section-title">Import errors</h3>${importErrors.map(p => `<section class="panel"><p>${link(p.source.url, `Post ${p.id}`)} · ${esc(p.reason)}</p><button data-import-retry="${p.id}">Retry next poll</button> <button class="link-button danger" data-import-dismiss="${p.id}">Dismiss</button></section>`).join('')}` : ''}<h3 class="section-title">Pending imports</h3><p class="muted">Accept posts for the index here. Release approval is managed separately.</p>${imports.map(c => importCard(c, allMods)).join('') || '<p>No pending imports.</p>'}<h3 class="section-title">Users</h3><div class="scroll"><table><thead><tr><th>Username</th><th>Role</th><th>Registered</th><th>Mods</th><th>Votes</th><th></th></tr></thead><tbody>${users.map(u => `<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td class="date">${date(u.created_at)}</td><td>${u.mods}</td><td>${u.votes}</td><td>${u.id !== session.user.id ? `<button class="link-button danger" data-delete-user="${u.id}" data-name="${esc(u.username)}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div><h3 class="section-title">Mods</h3><div class="scroll"><table><thead><tr><th>Name</th><th>Author</th><th></th></tr></thead><tbody>${allMods.map(m => `<tr><td><a href="/mod/${m.id}" data-nav>${esc(m.name)}</a></td><td>${esc(usernames.get(m.user_id) || m.author)}</td><td><button class="link-button danger" data-delete-mod="${m.id}">Remove</button></td></tr>`).join('') || '<tr><td colspan="3">No mods.</td></tr>'}</tbody></table></div>`;
 }
 async function render() {
   if (disposeGallery) {disposeGallery(); disposeGallery = null;}
@@ -270,6 +283,17 @@ async function render() {
     else view.innerHTML = '<p>Page not found.</p><a href="/" data-nav>Index</a>';
   } catch (error) {if (current === routeVersion) {view.innerHTML = ''; notice(error.message);}}
 }
+document.addEventListener('change', event => {
+  if (!event.target.matches('[data-import-target]')) return;
+  const panel = event.target.closest('[data-import]'), selected = event.target.selectedOptions[0];
+  const existing = Number(selected.value) > 0;
+  panel.querySelector('[data-import-publish]').textContent = existing ? 'Update listing' : 'Create listing';
+  panel.querySelector('[data-import-history]').hidden = !existing;
+  panel.querySelector('[data-import-help]').hidden = !existing;
+  const current = panel.querySelector('[data-import-current]');
+  current.hidden = !existing;
+  current.innerHTML = existing ? `<a href="/mod/${Number(selected.value)}" target="_blank" rel="noopener noreferrer">View current listing</a> · Updated ${date(Number(selected.dataset.updated))}` : '';
+});
 document.addEventListener('click', async event => {
   const a = event.target.closest('a[data-nav]');
   if (a && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) {event.preventDefault(); navigate(a.getAttribute('href')); return;}
@@ -296,11 +320,13 @@ document.addEventListener('click', async event => {
       await api(`/api/admin/import-errors/${button.dataset.importRetry || button.dataset.importDismiss}`, {method: 'POST', body: {action: button.dataset.importRetry ? 'retry' : 'dismiss'}});
       await render();
     }
-    if (button.dataset.importPublish || button.dataset.importReject) {
+    if (button.dataset.importPublish || button.dataset.importHistory || button.dataset.importReject) {
       button.disabled = true;
       const panel = button.closest('[data-import]'), choice = panel.querySelector('[data-import-target]').selectedOptions[0];
-      const result = await api(`/api/admin/imports/${panel.dataset.import}`, {method: 'POST', body: {action: button.dataset.importReject ? 'reject' : 'publish', target_id: Number(choice.value), revision: Number(choice.dataset.revision)}});
-      await render(); if (result.warning) notice(result.warning);
+      const action = button.dataset.importReject ? 'reject' : button.dataset.importHistory ? 'history' : 'publish';
+      const result = await api(`/api/admin/imports/${panel.dataset.import}`, {method: 'POST', body: {action, target_id: Number(choice.value), revision: Number(choice.dataset.revision)}});
+      await render();
+      notice(result.warning || (action === 'history' ? 'Added to history.' : action === 'reject' ? 'Import dismissed.' : Number(choice.value) ? 'Listing updated.' : 'Listing created.'), !result.warning);
     }
     if (button.dataset.approve) {button.disabled = true; await api(`/api/mods/${button.dataset.id}/approval`, {method: 'PUT', body: {approved: button.dataset.approve === 'true', revision: Number(button.dataset.revision)}}); await render();}
     if (button.dataset.revoke) {await api(`/api/tokens/${button.dataset.revoke}`, {method: 'DELETE'}); await render();}
