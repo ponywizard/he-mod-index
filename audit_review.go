@@ -76,6 +76,7 @@ type auditReport struct {
 	SHA256               string            `json:"sha256"`
 	Model                string            `json:"model"`
 	Reasoning            string            `json:"reasoning"`
+	MaxOutputTokens      int               `json:"max_output_tokens,omitempty"`
 	State                string            `json:"state"`
 	Scope                string            `json:"scope"`
 	CreatedAt            int64             `json:"created_at"`
@@ -273,9 +274,9 @@ func revalidateAudit(in auditInspection, saved auditReport, result *auditModelRe
 // interruption after dispatch must not cause another billable request on retry.
 // Exact artifact hashes are independent of URL, filename and mod ID. Metadata
 // reuse is separately qualified by the current listing/history fingerprint.
-func auditReviewInput(in auditInspection, c auditContext, instructions string) (map[string]any, string, error) {
+func auditReviewInput(in auditInspection, c auditContext, instructions, reasoning string, maxOutput int) (map[string]any, string, error) {
 	input := map[string]any{"inspection": in, "current_context": c, "metadata_evidence_texts": auditEvidenceTexts(auditInspection{}, c)}
-	frozen, err := json.Marshal(map[string]any{"instructions": instructions, "input": input, "schema": auditSchema(), "reasoning": "high", "max_output_tokens": 12000})
+	frozen, err := json.Marshal(map[string]any{"instructions": instructions, "input": input, "schema": auditSchema(), "reasoning": reasoning, "max_output_tokens": maxOutput})
 	if err != nil {
 		return nil, "", err
 	}
@@ -285,17 +286,24 @@ func auditReviewInput(in auditInspection, c auditContext, instructions string) (
 func reviewAudit(ctx context.Context, client *modelClient, cache string, in auditInspection, c auditContext) (auditReport, error) {
 	r := auditReport{Policy: auditPolicy, SHA256: in.SHA256, Model: "gpt-6.2-astra", Reasoning: "high", State: "incomplete", Scope: "Static source review only. Media assets hashed, not decoded; no runtime testing or safety guarantee.", CreatedAt: time.Now().Unix(), ContextSHA256: auditContextHash(c), Context: c, MetadataCurrent: true, Issues: in.Issues, ValidationVersion: auditValidationVersion}
 	instructions := auditInstructions
+	r.MaxOutputTokens = 12000
 	if client != nil {
 		client.lastUsage = nil
 		if client.model != "gpt-6.2-astra" && client.model != "gpt-6.2-sol" {
 			return r, errors.New("unsupported audit model")
 		}
 		r.Model = client.model
+		if client.reasoning != "" {
+			r.Reasoning = client.reasoning
+		}
+		if client.maxOutput != 0 {
+			r.MaxOutputTokens = client.maxOutput
+		}
 		if client.auditPrompt != "" {
 			instructions = client.auditPrompt
 		}
 	}
-	input, inputHash, err := auditReviewInput(in, c, instructions)
+	input, inputHash, err := auditReviewInput(in, c, instructions, r.Reasoning, r.MaxOutputTokens)
 	if err != nil {
 		return r, err
 	}
@@ -313,6 +321,9 @@ func reviewAudit(ctx context.Context, client *modelClient, cache string, in audi
 		}
 		if saved.Model != r.Model {
 			return r, errors.New("cached review belongs to another model")
+		}
+		if saved.Reasoning != r.Reasoning {
+			return r, errors.New("cached review uses another reasoning setting")
 		}
 		if client != nil && client.auditPrompt != "" && saved.InputSHA256 != r.InputSHA256 {
 			return r, errors.New("comparison inputs changed; refusing to reuse or repeat the paid review")

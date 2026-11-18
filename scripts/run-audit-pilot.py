@@ -65,8 +65,11 @@ def main():
     bundle = Path(__file__).resolve().parent
     manifest = json.loads(read_regular(bundle / "manifest.json", 65536))
     comparison_model = manifest.get("comparison_model")
+    reasoning = manifest.get("comparison_reasoning", "high")
     if comparison_model not in (None, "gpt-6.2-sol"):
         raise RuntimeError("Unsupported comparison model")
+    if reasoning not in ("high", "xhigh") or not comparison_model and reasoning != "high":
+        raise RuntimeError("Unsupported comparison reasoning")
     blobs = {}
     for name, expected in manifest["files"].items():
         if Path(name).name != name or name in (".", ".."):
@@ -105,7 +108,10 @@ def main():
     base = Path("/srv/he-mod-index/audit-pilot")
     base.mkdir(mode=0o750, exist_ok=True)
     os.chown(base, 0, service.pw_gid)
-    work = base / ("sol-comparison-20261118" if comparison_model else "research-20261118")
+    work_name = "sol-comparison-20261118" if comparison_model else "research-20261118"
+    if reasoning == "xhigh":
+        work_name = "sol-xhigh-comparison-20261118"
+    work = base / work_name
     work.mkdir(mode=0o750, exist_ok=True)
     os.chown(work, 0, service.pw_gid)
     outputs = work / "results"
@@ -147,7 +153,7 @@ def main():
         args = ["compare" if comparison_model else "review", "--inspection", str(work / case["inspection"]),
                 "--out", str(output), "--budget", cap]
         if comparison_model:
-            args += ["--model", comparison_model, "--report", str(work / case["baseline"])]
+            args += ["--model", comparison_model, "--reasoning", reasoning, "--report", str(work / case["baseline"])]
         elif case.get("mod_id"):
             args += ["--mod", str(case["mod_id"]), "--url", case["url"]]
         else:
@@ -165,10 +171,14 @@ def main():
                 raise RuntimeError("Report identity mismatch")
             if report["model"] != (comparison_model or "gpt-6.2-astra"):
                 raise RuntimeError("Report model mismatch")
+            if report["reasoning"] != reasoning:
+                raise RuntimeError("Report reasoning mismatch")
             write_atomic(export / filename, data, operator.pw_uid, operator.pw_gid, 0o600)
             audit_cache = Path(env["DATA_DIR"]) / "audits"
             if comparison_model:
                 audit_cache = audit_cache / "comparisons" / comparison_model
+                if reasoning != "high":
+                    audit_cache = audit_cache / reasoning
             diagnostic = audit_cache / case["artifact_sha256"] / "model-output.json"
             if diagnostic.exists() and report.get("error"):
                 write_atomic(export / f"{index:02d}-model-output.json", read_regular(diagnostic, 2 << 20),
@@ -207,7 +217,8 @@ def main():
                "configuration_preserved": read_regular(Path("/etc/he-mod-index.env"), 1 << 20) == raw_env,
                "listings_changed": False, "public_badges_changed": False}
     if comparison_model:
-        summary.update({"model": comparison_model, "baseline_model": "gpt-6.2-astra",
+        summary.update({"model": comparison_model, "reasoning": reasoning, "max_output_tokens": 24000 if reasoning == "xhigh" else 12000,
+                        "baseline_model": "gpt-6.2-astra",
                         "frozen_context": True, "unique_model_requests": len(usage_records),
                         "comparison_spent_or_reserved_usd": sum(u.get("actual_micros", u["reserved_micros"]) for u in usage_records.values()) / 1e6,
                         "comparison_input_tokens": sum(u["input_tokens"] for u in usage_records.values()),

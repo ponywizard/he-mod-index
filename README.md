@@ -515,6 +515,12 @@ The same database accounts for every call. Reports include usage tokens and
 actual/reserved cost, while a duplicate report retains the original usage ID.
 The comparison bundle runner permits at most $1 more within the existing $20
 cap and retains that ceiling on restart. It never applies proposed metadata.
+Use `--reasoning xhigh` for an explicitly requested higher-reasoning comparison.
+This keeps the frozen evidence/prompt and unchanged citation validator, and gives
+the model a 24,000-token output ceiling (including reasoning) instead of 12,000
+to avoid cutting off the extra reasoning. Reports record both settings. These
+results/attempts live under `comparisons/gpt-6.2-sol/xhigh/<sha256>/`, preserving
+the original high-reasoning reports and their spending records.
 
 Encrypted directories, files or scripts produce `red_flag` immediately, without
 a model call. This indicates blocked inspection, not proven malware. Opaque

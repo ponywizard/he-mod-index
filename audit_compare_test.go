@@ -123,3 +123,65 @@ func TestAuditComparisonRejectsIncorrectBaselineAndCap(t *testing.T) {
 		t.Fatal("silently ignored selected model")
 	}
 }
+
+func TestAuditXHighComparisonChangesOnlyReasoningAndOutputCeiling(t *testing.T) {
+	a := testApp(t)
+	in := inspectAuditBytes([]byte("extends Node\n"))
+	c := auditContext{Listing: modInput{Name: "Fixture", ShortDescription: "Frozen description"}}
+	response := auditTestResult(in, c)
+	requests := []map[string]any{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		requests = append(requests, body)
+		b, _ := json.Marshal(response)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "completed", "output": []any{map[string]any{"content": []any{map[string]any{"type": "output_text", "text": string(b)}}}}, "usage": map[string]int{"input_tokens": 100, "output_tokens": 100}})
+	}))
+	defer server.Close()
+	client := &modelClient{app: a, model: "gpt-6.2-sol", key: "test", budget: 20e6, endpoint: server.URL, client: server.Client(), reasoning: "high", maxOutput: 12000, auditPrompt: auditComparisonPrompt}
+	cache := t.TempDir()
+	high, err := reviewAudit(context.Background(), client, cache, in, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(cache, in.SHA256, "report.json"))
+	client.reasoning, client.maxOutput = "xhigh", 24000
+	if _, err = reviewAudit(context.Background(), client, cache, in, c); err == nil || len(requests) != 1 {
+		t.Fatal("reused high result or charged in the wrong cache", err)
+	}
+	xcache := filepath.Join(cache, "xhigh")
+	xhigh, err := reviewAudit(context.Background(), client, xcache, in, c)
+	if err != nil || xhigh.Reasoning != "xhigh" || xhigh.MaxOutputTokens != 24000 || xhigh.InputSHA256 == high.InputSHA256 || xhigh.Usage.ID == high.Usage.ID {
+		t.Fatal(xhigh, err)
+	}
+	if len(requests) != 2 || requests[1]["reasoning"].(map[string]any)["effort"] != "xhigh" || requests[1]["max_output_tokens"] != float64(24000) {
+		t.Fatal("incorrect API parameters", requests)
+	}
+	for _, r := range requests {
+		delete(r, "reasoning")
+		delete(r, "max_output_tokens")
+	}
+	one, _ := json.Marshal(requests[0])
+	two, _ := json.Marshal(requests[1])
+	if !bytes.Equal(one, two) {
+		t.Fatal("changed other comparison inputs")
+	}
+	duplicate, err := reviewAudit(context.Background(), client, xcache, in, c)
+	if err != nil || !duplicate.Cached || len(requests) != 2 {
+		t.Fatal("xhigh replay charged again", duplicate, err)
+	}
+	after, _ := os.ReadFile(filepath.Join(cache, in.SHA256, "report.json"))
+	if !bytes.Equal(before, after) {
+		t.Fatal("overwrote high baseline")
+	}
+	for _, args := range [][]string{
+		{"compare", "--inspection", "missing", "--report", "missing", "--out", "other", "--reasoning", "ultra"},
+		{"review", "--reasoning", "xhigh"},
+	} {
+		if err := runAudit(context.Background(), args, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "reasoning") {
+			t.Fatal("invalid reasoning accepted", err)
+		}
+	}
+}

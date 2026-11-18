@@ -267,6 +267,7 @@ func runAudit(ctx context.Context, args []string, out io.Writer) error {
 	inspection := fs.String("inspection", "", "saved isolated inspection JSON")
 	reportFile := fs.String("report", "", "saved report to revalidate or use as a comparison baseline")
 	comparisonModel := fs.String("model", "gpt-6.2-sol", "compare: alternate model (gpt-6.2-sol)")
+	comparisonReasoning := fs.String("reasoning", "high", "compare: high or xhigh (xhigh allows up to 24000 output tokens)")
 	modelOutput := fs.String("model-output", "", "saved model output if the report failed validation")
 	modID := fs.Int64("mod", 0, "existing listing ID (current edits/history read at review time)")
 	contextFile := fs.String("context", "", "synthetic fixture context JSON instead of a listing")
@@ -283,16 +284,16 @@ func runAudit(ctx context.Context, args []string, out io.Writer) error {
 	}
 	modelFlag := false
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "model" {
+		if f.Name == "model" || f.Name == "reasoning" {
 			modelFlag = true
 		}
 	})
 	if modelFlag && args[0] != "compare" {
-		return errors.New("--model requires audit compare; normal reviews use Astra")
+		return errors.New("--model and --reasoning require audit compare; normal reviews use Astra high")
 	}
 	switch args[0] {
 	case "compare":
-		return runAuditComparison(ctx, auditComparisonOptions{Inspection: *inspection, Baseline: *reportFile, Output: *output, Model: *comparisonModel, EnvFile: *envFile, Budget: *budget}, out)
+		return runAuditComparison(ctx, auditComparisonOptions{Inspection: *inspection, Baseline: *reportFile, Output: *output, Model: *comparisonModel, EnvFile: *envFile, Reasoning: *comparisonReasoning, Budget: *budget}, out)
 	case "revalidate":
 		if *inspection == "" || *reportFile == "" || *output == "" {
 			return errors.New("revalidate requires --inspection, --report and --out")

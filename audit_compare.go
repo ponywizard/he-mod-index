@@ -20,8 +20,8 @@ import (
 var auditComparisonPrompt string
 
 type auditComparisonOptions struct {
-	Inspection, Baseline, Output, Model, EnvFile string
-	Budget                                       float64
+	Inspection, Baseline, Output, Model, EnvFile, Reasoning string
+	Budget                                                  float64
 }
 
 func auditComparisonBaseline(in auditInspection, baseline auditReport) error {
@@ -34,7 +34,7 @@ func auditComparisonBaseline(in auditInspection, baseline auditReport) error {
 	if baseline.Model != "gpt-6.2-astra" || baseline.Reasoning != "high" {
 		return errors.New("comparison requires the saved Astra high-reasoning pilot baseline")
 	}
-	_, inputHash, err := auditReviewInput(in, baseline.Context, auditComparisonPrompt)
+	_, inputHash, err := auditReviewInput(in, baseline.Context, auditComparisonPrompt, "high", 12000)
 	if err != nil {
 		return err
 	}
@@ -50,6 +50,12 @@ func runAuditComparison(ctx context.Context, o auditComparisonOptions, out io.Wr
 	}
 	if o.Model != "gpt-6.2-sol" {
 		return errors.New("comparison model must be gpt-6.2-sol")
+	}
+	if o.Reasoning == "" {
+		o.Reasoning = "high"
+	}
+	if o.Reasoning != "high" && o.Reasoning != "xhigh" {
+		return errors.New("comparison reasoning must be high or xhigh")
 	}
 	if math.IsNaN(o.Budget) || math.IsInf(o.Budget, 0) || o.Budget <= 0 || o.Budget > 20 {
 		return errors.New("audit cumulative budget must be >0 and <=20 USD")
@@ -88,12 +94,18 @@ func runAuditComparison(ctx context.Context, o auditComparisonOptions, out io.Wr
 	if err != nil {
 		return err
 	}
-	c.reasoning, c.maxOutput, c.auditPrompt = "high", 12000, auditComparisonPrompt
+	c.reasoning, c.maxOutput, c.auditPrompt = o.Reasoning, 12000, auditComparisonPrompt
+	if o.Reasoning == "xhigh" {
+		c.maxOutput = 24000
+	}
 	c.client.Timeout = 8 * time.Minute
 	c.client.Transport.(*http.Transport).ResponseHeaderTimeout = 8 * time.Minute
 	// Deliberate model comparison has its own result namespace, not a new usage
 	// ledger. Original Astra reports and interrupted attempts stay untouched.
 	cache := filepath.Join(dir, "audits", "comparisons", o.Model)
+	if o.Reasoning != "high" {
+		cache = filepath.Join(cache, o.Reasoning)
+	}
 	r, reviewErr := reviewAudit(ctx, c, cache, in, baseline.Context)
 	r.BaselineModel, r.BaselineReportSHA256 = baseline.Model, auditHash(baselineBytes)
 	r.MetadataCurrent = baseline.Context.ModID == 0 // Frozen context, not live edits.
@@ -104,7 +116,7 @@ func runAuditComparison(ctx context.Context, o auditComparisonOptions, out io.Wr
 	if err := db.QueryRow("SELECT COALESCE(SUM(COALESCE(actual_micros,reserved_micros)),0) FROM ingest_usage").Scan(&spent); err != nil {
 		return err
 	}
-	if err := json.NewEncoder(out).Encode(map[string]any{"model": r.Model, "sha256": r.SHA256, "state": r.State, "cached": r.Cached, "frozen_context": true, "spent_or_reserved_usd": float64(spent) / 1e6, "cap_usd": o.Budget, "usage": r.Usage}); err != nil {
+	if err := json.NewEncoder(out).Encode(map[string]any{"model": r.Model, "reasoning": r.Reasoning, "max_output_tokens": r.MaxOutputTokens, "sha256": r.SHA256, "state": r.State, "cached": r.Cached, "frozen_context": true, "spent_or_reserved_usd": float64(spent) / 1e6, "cap_usd": o.Budget, "usage": r.Usage}); err != nil {
 		return err
 	}
 	return reviewErr
