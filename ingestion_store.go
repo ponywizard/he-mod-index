@@ -190,15 +190,10 @@ func (a *app) extractPost(ctx context.Context, c *modelClient, p threadPost) err
 		return err
 	}
 	defer tx.Rollback()
-	var classificationReason string
-	if err = tx.QueryRow("SELECT reason FROM ingest_posts WHERE id=?", p.ID).Scan(&classificationReason); err != nil {
-		return err
-	}
 	for index, e := range entries {
-		if strings.HasPrefix(classificationReason, "uncertain:") {
-			e.Confidence = "uncertain"
-			e.Reason = classificationReason
-		}
+		// Classification only selects posts for extraction. With full quoted
+		// context, the extractor decides each mod's confidence independently;
+		// a post-level uncertainty must not override that later decision.
 		b, err := json.Marshal(e)
 		if err != nil {
 			return err

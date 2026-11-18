@@ -235,6 +235,10 @@ SQLite WAL/SHM files with it while copying, or stop its processes and use an onl
 SQLite backup. Do not replace the live database with the staging database.
 
 Clear candidates publish as unreviewed listings owned by the configured admin.
+The classifier only selects posts for closer extraction. Its `uncertain` result
+does not permanently hold a post: the extractor judges each mod independently
+using quoted context. A named, versioned bugfix with its own download need not
+repeat the mod's features or installation instructions to be a clear release.
 Automatic updates require a matching repository/name, the same download set, or
 an explicit prior announcement, and a newer source. Importer-owned listings follow
 thread updates by default. On a listing page, admins can enable **Follow thread

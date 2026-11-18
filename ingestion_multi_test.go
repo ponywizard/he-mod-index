@@ -17,7 +17,7 @@ func multiModEntries() []extractedMod {
 		{Name: "Move In With Player", Version: "0.1.4", Downloads: []download{{Filename: "move_in_with_player-0.1.4.zip", URL: "https://u.pone.rs/mtmljjyl.zip"}}, ShortDescription: "Invite ponies without a home to move into yours.", Confidence: "clear"},
 	}
 }
-func extractMultiFixture(t *testing.T, a *app, postID int64, entries []extractedMod) []importCandidate {
+func extractMultiFixture(t *testing.T, a *app, postID int64, entries []extractedMod, classificationReason ...string) []importCandidate {
 	t.Helper()
 	p := threadPost{ID: postID, ThreadID: 43715264, Time: postID, Author: "Anonymous", URL: fmt.Sprintf("https://desuarchive.org/mlp/thread/43715264/#%d", postID)}
 	for _, e := range entries {
@@ -30,6 +30,11 @@ func extractMultiFixture(t *testing.T, a *app, postID int64, entries []extracted
 	p = normalizePost(p)
 	if err := a.savePosts(context.Background(), []threadPost{p}); err != nil {
 		t.Fatal(err)
+	}
+	if len(classificationReason) > 0 {
+		if _, err := a.db.Exec("UPDATE ingest_posts SET reason=? WHERE id=?", classificationReason[0], postID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	payload, _ := json.Marshal(map[string]any{"entries": entries})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +66,57 @@ func extractMultiFixture(t *testing.T, a *app, postID int64, entries []extracted
 		t.Fatal("lost sibling entry", out)
 	}
 	return out
+}
+
+func TestClassifierUncertaintyDoesNotOverridePerModExtraction(t *testing.T) {
+	for _, screening := range []string{"uncertain: Update lacks full package details.", "release: Named update with downloads."} {
+		t.Run(screening, func(t *testing.T) {
+			a := testApp(t)
+			admin := client(a, "192.0.2.1")
+			owner := admin.provision(t, "operator", "admin")
+			entries := multiModEntries()
+			entries[0].Reason = "The target supplies a named, versioned release and its own download."
+			entries[1].Confidence = "uncertain"
+			entries[1].Reason = "The relationship between these packages is unclear."
+			candidates := extractMultiFixture(t, a, 43721459, entries, screening)
+			for i, c := range candidates {
+				if c.Entry.Confidence != entries[i].Confidence || c.Entry.Reason != entries[i].Reason {
+					t.Fatal("post screening replaced the per-mod extraction decision", c.Entry)
+				}
+			}
+			if err := a.publishPending(context.Background(), owner.ID); err != nil {
+				t.Fatal(err)
+			}
+			for i, want := range []string{"published", "pending"} {
+				var state string
+				if err := a.db.QueryRow("SELECT state FROM ingest_candidates WHERE id=?", candidates[i].ID).Scan(&state); err != nil || state != want {
+					t.Fatal(i, state, err)
+				}
+			}
+			var reason string
+			if err := a.db.QueryRow("SELECT reason FROM ingest_posts WHERE id=43721459").Scan(&reason); err != nil || reason != screening {
+				t.Fatal("lost screening evidence", reason, err)
+			}
+		})
+	}
+}
+
+func TestContextResolvedUpdateAfterUncertainScreening(t *testing.T) {
+	a, admin, owner, m, first := followFixture(t)
+	followSetting(t, admin, m.ID, true)
+	entries := []extractedMod{followRelease(first)}
+	candidates := extractMultiFixture(t, a, 43721895, entries, "uncertain: Announces a versioned bugfix with a direct download, but no package details beyond changes.")
+	if err := a.publishPending(context.Background(), owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, err := a.readMod(m.ID, 0)
+	if err != nil || after.Version != "0.6.2" || after.UserID != m.UserID || after.Description != m.Description {
+		t.Fatal("context-resolved update did not reach the original listing", after, err)
+	}
+	var state string
+	if err = a.db.QueryRow("SELECT state FROM ingest_candidates WHERE id=?", candidates[0].ID).Scan(&state); err != nil || state != "published" {
+		t.Fatal(state, err)
+	}
 }
 func TestMultipleModsKeepIndependentReleasesAndHistory(t *testing.T) {
 	a := testApp(t)
