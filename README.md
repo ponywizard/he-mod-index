@@ -323,7 +323,8 @@ the evaluation model. Normal runs use `--extract-model` for the second stage.
 Keep source data, labels, and generated output out of Git.
 A small evaluation sample does not establish general reliability; review held
 imports and spot-check excluded posts as the threads change. Source-code and
-malware auditing, and an “Agent Reviewed” badge, are separate future work.
+The CLI source-audit pilot below produces private reports. Public automated
+review badges and automatic editorial application remain future work.
 
 ## Configuration
 
@@ -442,6 +443,80 @@ This writes Linux amd64/arm64 archives and `SHA256SUMS` under `dist/`. Each arch
 contains the executable, `deploy.sh`, `he-mod-index.service`, README, and license.
 To build only one architecture, append it: `scripts/build-release.sh v0.1.0 amd64`.
 Upload those artifacts to a release; building them does not publish anything.
+
+## Source-audit pilot
+
+This is a private CLI dry run, using `gpt-6.2-astra` with high reasoning through
+the Responses API. It does not change listings, release approvals or public
+badges. Titles and descriptions are proposed using the current operator-edited
+listing, accepted post history and package source. A context hash marks a cached
+proposal stale when the listing/history changes; artifact findings are reused.
+
+Build a static Linux binary and install Bubblewrap on the inspection machine:
+
+```sh
+CGO_ENABLED=0 go build -o he-mod-index .
+./he-mod-index audit fetch --url https://public-host.example/mod.pck --out /tmp/mod.pck
+./he-mod-index audit inspect --file /tmp/mod.pck --out /tmp/mod.inspection.json
+DATA_DIR=/path/to/existing/data ./he-mod-index audit review \
+  --inspection /tmp/mod.inspection.json --mod 123 \
+  --url https://public-host.example/mod.pck --budget 20 --out /tmp/mod.report.json
+```
+
+The downloader shares the image fetcher's public-IP validation and DNS pinning,
+including redirects. Inspection runs in a fresh networkless namespace with only
+the trusted static executable and package mounted read-only. No database, API
+key, home directory or Godot runtime is available. There is no unsandboxed
+fallback. PCK v2–v4 and nested ZIPs are read as bytes with checksums, path checks,
+bounded expansion, file counts, context size, memory and time. Package code never
+runs. Paths in inventories escape `%` and `!` to distinguish nested containers.
+
+Each exact download has a SHA-256 identity; identical script copies within a
+package share one text payload. Changing a URL or filename does not trigger a
+second paid review of the same bytes. Reports and durable attempt markers live
+under `DATA_DIR/audits/<sha256>/`. A crashed, failed or incomplete attempt is not
+silently retried. Before an explicit retry, inspect its report, saved model
+output and shared usage reservation; retain that accounting. Parser/policy
+changes do not automatically rerun old hashes. Never use a stale metadata
+proposal to overwrite newer edits.
+
+Encrypted directories, files or scripts produce `red_flag` immediately, without
+a model call. This indicates blocked inspection, not proven malware. Opaque
+executables, compiled scripts, binary Godot resources, excessive source and
+unknown formats prevent a complete review. Known media assets are hashed, not
+decoded; a source review cannot exclude media-parser exploits or prove runtime
+safety. Results are `no_findings`, `findings`, `incomplete`, or `red_flag`.
+Only completed model output with full text coverage and verifiable source
+quotes can produce `no_findings`; failures and budget exhaustion cannot.
+
+`audit review` requires an **existing** schema-10 database and shares its
+`ingest_usage` ledger and lock. It never creates a separate live spending pool,
+migrates schema, provisions accounts or writes listings. The cap is cumulative
+across ingestion and audits and cannot exceed **$20** in this pilot. Every
+request reserves a conservative byte-based upper bound before dispatch; failed
+requests retain that reservation. Astra uses standard service pricing, 12,000
+maximum output tokens including reasoning, and no cache writes. No automatic
+retries or model fallback are enabled. `audit status` prints the shared total.
+
+For the operator's included-credit-only policy, API Auto Recharge is off and
+there is no purchased balance or pay-as-you-go fallback. The application cap is
+additional protection, not a view of the organization's credit balance or other
+applications' spending. The December credit renewal does not reset this cap.
+
+`scripts/run-audit-pilot.py` runs a prepared checksummed bundle as the existing
+service user, reading the current production listing context and sharing its
+ledger. It stores a persistent pilot allowance of at most $6 **inside** the $20
+cap. The site remains online and its configuration is untouched. Inspectors run
+locally before staging; the server only receives their validated reports and
+calls the model. Synthetic clean, injection and suspicious-data-flow fixtures
+live under `testdata/audit/`; they are never executed. A public Agent Reviewed
+badge and automatic metadata application follow only after evaluating this
+pilot, and will remain separate from human release approval.
+
+Primary references: [Astra pricing](https://developers.openai.com/api/docs/models/gpt-6.2-astra),
+[cache-write controls](https://developers.openai.com/api/docs/guides/prompt-caching),
+[included API credits](https://help.openai.com/en/articles/20001626-api-credits-benefit-for-eligible-chatgpt-subscriptions),
+[Godot PCK reader](https://github.com/godotengine/godot/blob/master/core/io/file_access_pack.cpp).
 
 ## Development
 

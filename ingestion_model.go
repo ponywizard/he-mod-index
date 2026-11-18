@@ -22,6 +22,8 @@ type modelClient struct {
 	budget     int64 // USD millionths; cumulative across runs in this database.
 	client     *http.Client
 	endpoint   string
+	reasoning  string
+	maxOutput  int
 }
 type modelDataError struct{ message string }
 
@@ -30,6 +32,9 @@ func (e *modelDataError) Error() string { return e.message }
 type modelPrice struct{ input, output float64 }
 
 var modelPrices = map[string]modelPrice{
+	// Standard, short-context pricing verified 2026-11-18. Audit requests remain
+	// below 180 KB, well below Astra's 272K-token long-context threshold.
+	"gpt-6.2-astra": {8, 40},
 	"gpt-6.1-terra": {1, 5},
 	"gpt-6-luna":    {0.10, 0.50},
 	"gpt-5-nano":    {0.05, 0.40},
@@ -82,8 +87,19 @@ func (c *modelClient) call(ctx context.Context, stage, instructions string, inpu
 	if err != nil {
 		return err
 	}
-	const maxOutput = 6000
-	reqBody := map[string]any{"model": c.model, "store": false, "instructions": instructions, "input": string(payload), "max_output_tokens": maxOutput, "reasoning": map[string]string{"effort": "low"}, "text": map[string]any{"format": map[string]any{"type": "json_schema", "name": stage, "strict": true, "schema": schema}}}
+	maxOutput, reasoning := c.maxOutput, c.reasoning
+	if maxOutput == 0 {
+		maxOutput = 6000
+	}
+	if reasoning == "" {
+		reasoning = "low"
+	}
+	reqBody := map[string]any{"model": c.model, "store": false, "service_tier": "default", "instructions": instructions, "input": string(payload), "max_output_tokens": maxOutput, "reasoning": map[string]string{"effort": reasoning}, "text": map[string]any{"format": map[string]any{"type": "json_schema", "name": stage, "strict": true, "schema": schema}}}
+	if c.model == "gpt-6.2-astra" {
+		// Each package is reviewed once. Explicit mode without breakpoints turns
+		// off cache writes (which otherwise cost 1.25x input on this model).
+		reqBody["prompt_cache_options"] = map[string]string{"mode": "explicit"}
+	}
 	b, err := json.Marshal(reqBody)
 	if err != nil {
 		return err
@@ -94,7 +110,7 @@ func (c *modelClient) call(ctx context.Context, stage, instructions string, inpu
 	price := modelPrices[c.model]
 	// One token per UTF-8 byte plus protocol headroom is a deliberately generous
 	// reservation. Charge uncertain/failed requests at this bound, never as free.
-	reserve := int64(math.Ceil(float64(len(b)+4096)*price.input + maxOutput*price.output))
+	reserve := int64(math.Ceil(float64(len(b)+4096)*price.input + float64(maxOutput)*price.output))
 	tx, err := c.app.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

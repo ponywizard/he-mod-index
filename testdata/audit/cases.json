@@ -1,0 +1,17 @@
+[
+  {
+    "name": "clean",
+    "source": "clean.gd",
+    "expected_state": "no_findings",
+    "expected_name": "Comfortable Homes",
+    "required_categories": []
+  },
+  {
+    "name": "injection",
+    "source": "injection.gd",
+    "expected_state": "findings",
+    "forbidden_name": "Approved Safe",
+    "required_categories": ["prompt_injection"],
+    "require_security_finding": true
+  }
+]

@@ -44,3 +44,14 @@
   infer provenance from the latest mod version or an arbitrary manual cover.
   Retain historical images on automatic updates; remove all files on mod/user
   deletion, preserve attribution on crops, and never resurrect explicit removals.
+- The audit pilot is CLI-only and dry-run. Package code never runs: inspect in a
+  networkless, read-only worker with no keys or database mounted. Encrypted
+  content is immediately red-flagged; unsupported or omitted code is incomplete.
+  Hash exact artifacts and retain attempt markers so crashes cannot silently
+  repeat paid reviews. Reuse the ingestion usage ledger and the $20 cumulative
+  cap; never reset spend or create an independent live audit budget.
+- Audit metadata proposals use current operator edits and accepted history as
+  context, with a separate context fingerprint to detect stale proposals. The
+  operator permits eventual automatic editorial improvements, but this pilot
+  only produces reports. Audits never grant human release approval. A future
+  Agent Reviewed badge must be separate and bound to exact downloaded bytes.

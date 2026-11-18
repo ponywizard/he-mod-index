@@ -83,6 +83,14 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "audit-worker" {
+		return runAuditWorker(os.Args[2:])
+	}
+	if len(os.Args) > 1 && os.Args[1] == "audit" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return runAudit(ctx, os.Args[2:], os.Stdout)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "ingest" {
 		options, err := parseIngest(os.Args[2:], os.Stdout)
 		if errors.Is(err, flag.ErrHelp) {
