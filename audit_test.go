@@ -208,6 +208,104 @@ func TestAuditModelCoverageAndEvidence(t *testing.T) {
 	}
 }
 
+func TestAuditEvidenceUsesExactCitedLineAndAcceptsCRLF(t *testing.T) {
+	text := "extends Node\r\n\tlog(\"diagnostic\")\r\n\t\tfile.seek_end()\r\n\t\tfile.store_line(text)\r\n{\"description\":\"Choose a local song.\"}\r\n"
+	for _, tc := range []struct {
+		name  string
+		line  int
+		quote string
+		valid bool
+	}{
+		{"indent omitted", 2, "log(\"diagnostic\")", true},
+		{"line endings only", 3, "file.seek_end()\n\t\tfile.store_line(text)", true},
+		{"original line endings", 3, "\t\tfile.seek_end()\r\n\t\tfile.store_line(text)", true},
+		{"within JSON value", 5, "Choose a local song.", true},
+		{"wrong line", 1, "log(\"diagnostic\")", false},
+		{"later line", 2, "file.seek_end()", false},
+		{"different word", 5, "Choose a remote song.", false},
+		{"altered whitespace", 2, "log( \"diagnostic\" )", false},
+		{"altered indentation", 3, "file.seek_end()\n\tfile.store_line(text)", false},
+		{"skipped line", 2, "log(\"diagnostic\")\n\t\tfile.store_line(text)", false},
+		{"empty", 2, "", false},
+		{"blank prefix", 2, "\n\t\tfile.seek_end()", false},
+		{"zero line", 0, "extends Node", false},
+		{"out of range", 100, "extends Node", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := auditEvidenceMatches(text, auditEvidence{Line: tc.line, Quote: tc.quote}); got != tc.valid {
+				t.Fatalf("matched=%v want=%v", got, tc.valid)
+			}
+		})
+	}
+}
+
+func TestAuditOfflineRevalidationPreservesEvidenceAndPartialCoverage(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DATA_DIR", filepath.Join(dir, "must-not-create"))
+	t.Setenv("OPENAI_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	in := inspectAuditBytes([]byte("\tlog(\"diagnostic\")\r\n"))
+	c := auditContext{ModID: 3, Listing: modInput{Name: "Manual title", ShortDescription: "Manual correction"}}
+	result := auditTestResult(in, c)
+	result.Conclusion = "findings"
+	result.Findings = []auditFinding{{Severity: "low", Category: "suspicious_behavior", Title: "Local logging", Evidence: []auditEvidence{{Path: "package", Line: 1, Quote: "log(\"diagnostic\")"}}}}
+	saved := auditReport{Policy: auditPolicy, SHA256: in.SHA256, Context: c, ContextSHA256: auditContextHash(c), State: "incomplete", Error: "finding quote does not match source line", CreatedAt: 123, MetadataCurrent: true}
+	inputs := map[string]any{"inspection.json": in, "report.json": saved, "model-output.json": result}
+	original := map[string][]byte{}
+	for name, data := range inputs {
+		if err := auditWriteJSON(filepath.Join(dir, name), data); err != nil {
+			t.Fatal(err)
+		}
+		original[name], _ = os.ReadFile(filepath.Join(dir, name))
+	}
+	args := []string{"revalidate", "--inspection", filepath.Join(dir, "inspection.json"), "--report", filepath.Join(dir, "report.json"), "--model-output", filepath.Join(dir, "model-output.json"), "--out", filepath.Join(dir, "verified.json")}
+	var output bytes.Buffer
+	if err := runAudit(context.Background(), args, &output); err != nil {
+		t.Fatal(err)
+	}
+	var verified auditReport
+	if err := auditReadJSON(filepath.Join(dir, "verified.json"), &verified); err != nil {
+		t.Fatal(err)
+	}
+	if verified.State != "findings" || verified.Error != "" || verified.CreatedAt != 123 || verified.MetadataCurrent || verified.ValidationVersion != auditValidationVersion || !strings.Contains(output.String(), `"model_calls":0`) {
+		t.Fatal(verified, output.String())
+	}
+	for name, before := range original {
+		after, _ := os.ReadFile(filepath.Join(dir, name))
+		if !bytes.Equal(before, after) {
+			t.Fatalf("changed input %s", name)
+		}
+	}
+	if _, err := os.Stat(os.Getenv("DATA_DIR")); !os.IsNotExist(err) {
+		t.Fatal("opened a database during offline validation", err)
+	}
+	// A metadata quote fix cannot convert opaque binaries into a full review.
+	in.Issues = []auditIssue{{Path: "package!/scene.scn", Code: "unsupported", Detail: "Opaque Godot scene"}}
+	result = auditTestResult(in, c)
+	partial, err := revalidateAudit(in, saved, &result)
+	if err != nil || partial.State != "incomplete" || partial.Result == nil {
+		t.Fatal(partial, err)
+	}
+	in.Issues[0].Code = "encrypted"
+	blocked, err := revalidateAudit(in, saved, &result)
+	if err != nil || blocked.State != "red_flag" || blocked.Result != nil {
+		t.Fatal(blocked, err)
+	}
+	in.SHA256 = strings.Repeat("0", 64)
+	if _, err = revalidateAudit(in, saved, &result); err == nil {
+		t.Fatal("wrong artifact accepted")
+	}
+	in.SHA256 = saved.SHA256
+	saved.Context.Listing.Name = "Edited without updating fingerprint"
+	if _, err = revalidateAudit(in, saved, &result); err == nil {
+		t.Fatal("changed context accepted")
+	}
+	args[len(args)-1] = filepath.Join(dir, "report.json")
+	if err := runAudit(context.Background(), args, &bytes.Buffer{}); err == nil {
+		t.Fatal("overwrote the original report")
+	}
+}
+
 func TestAuditDeduplicatesPaidCallsAndRespectsSharedBudget(t *testing.T) {
 	a := testApp(t)
 	in := inspectAuditBytes([]byte("extends Node\n"))

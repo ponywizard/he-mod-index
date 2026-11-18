@@ -226,7 +226,7 @@ func openAuditLedger(dir string) (*sql.DB, error) {
 
 func runAudit(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: audit fetch|inspect|review [flags]; see README")
+		return errors.New("usage: audit fetch|inspect|review|revalidate|status [flags]; see README")
 	}
 	fs := flag.NewFlagSet("audit "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -234,6 +234,8 @@ func runAudit(ctx context.Context, args []string, out io.Writer) error {
 	raw := fs.String("url", "", "public download URL")
 	output := fs.String("out", "", "output file")
 	inspection := fs.String("inspection", "", "saved isolated inspection JSON")
+	reportFile := fs.String("report", "", "saved report to revalidate offline")
+	modelOutput := fs.String("model-output", "", "saved model output if the report failed validation")
 	modID := fs.Int64("mod", 0, "existing listing ID (current edits/history read at review time)")
 	contextFile := fs.String("context", "", "synthetic fixture context JSON instead of a listing")
 	budget := fs.Float64("budget", 20, "cumulative shared ingestion + audit cap, at most $20")
@@ -248,6 +250,62 @@ func runAudit(ctx context.Context, args []string, out io.Writer) error {
 		return errors.New("unexpected arguments")
 	}
 	switch args[0] {
+	case "revalidate":
+		if *inspection == "" || *reportFile == "" || *output == "" {
+			return errors.New("revalidate requires --inspection, --report and --out")
+		}
+		// Explicit separate output preserves the original evidence trail, even
+		// if an operator accidentally supplies the same file under another path.
+		for _, input := range []string{*inspection, *reportFile, *modelOutput} {
+			if input == "" {
+				continue
+			}
+			inPath, err := filepath.Abs(input)
+			if err != nil {
+				return err
+			}
+			outPath, err := filepath.Abs(*output)
+			if err != nil {
+				return err
+			}
+			if inPath == outPath {
+				return errors.New("revalidation output must not replace an input")
+			}
+			if outInfo, err := os.Stat(outPath); err == nil {
+				inInfo, err := os.Stat(inPath)
+				if err != nil {
+					return err
+				}
+				if os.SameFile(inInfo, outInfo) {
+					return errors.New("revalidation output must not replace an input")
+				}
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+		}
+		var in auditInspection
+		if err := auditReadJSON(*inspection, &in); err != nil {
+			return err
+		}
+		var saved auditReport
+		if err := auditReadJSON(*reportFile, &saved); err != nil {
+			return err
+		}
+		result := saved.Result
+		if *modelOutput != "" {
+			result = new(auditModelResult)
+			if err := auditReadJSON(*modelOutput, result); err != nil {
+				return err
+			}
+		}
+		report, reviewErr := revalidateAudit(in, saved, result)
+		if err := auditWriteJSON(*output, report); err != nil {
+			return err
+		}
+		if err := json.NewEncoder(out).Encode(map[string]any{"sha256": report.SHA256, "state": report.State, "model_calls": 0, "validation_version": report.ValidationVersion}); err != nil {
+			return err
+		}
+		return reviewErr
 	case "status":
 		db, err := openAuditLedger(env("DATA_DIR", "data"))
 		if err != nil {

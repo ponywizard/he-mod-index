@@ -480,6 +480,23 @@ output and shared usage reservation; retain that accounting. Parser/policy
 changes do not automatically rerun old hashes. Never use a stale metadata
 proposal to overwrite newer edits.
 
+Saved output can be revalidated offline after a validator fix, without another
+model call, a database or an API key:
+
+```sh
+./he-mod-index audit revalidate --inspection /tmp/mod.inspection.json \
+  --report /tmp/mod.report.json --model-output /tmp/model-output.json \
+  --out /tmp/mod.revalidated.json
+```
+
+Omit `--model-output` when the report already contains its accepted result. The
+output must be separate from the inputs; original reports, attempt markers and
+spending records remain intact. Quotes may begin within their cited source
+line, and CRLF/LF line endings are equivalent. Words, indentation within
+multiline quotes, line numbers and source hashes still have to match. A private
+offline report does not update the live audit cache, and cannot assert that its
+metadata proposal still matches the current listing.
+
 Encrypted directories, files or scripts produce `red_flag` immediately, without
 a model call. This indicates blocked inspection, not proven malware. Opaque
 executables, compiled scripts, binary Godot resources, excessive source and
