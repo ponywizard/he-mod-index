@@ -236,9 +236,19 @@ SQLite backup. Do not replace the live database with the staging database.
 
 Clear candidates publish as unreviewed listings owned by the configured admin.
 Automatic updates require a matching repository/name, the same download set, or
-an explicit prior announcement, and a newer source. Name-only matches, existing
-user-owned listings, and manually edited imports wait in **Admin → Pending
-imports**. The **Find listing** field filters the alphabetical picker by any part
+an explicit prior announcement, and a newer source. Importer-owned listings follow
+thread updates by default. On a listing page, admins can enable **Follow thread
+updates** for a modder-owned listing without transferring ownership, or disable
+automatic release updates for any listing. Only an admin session can change this
+setting; owner/reviewer sessions and upload tokens cannot. A listing must first
+have an accepted current release source. The switch does not accept a pending
+post itself; the next poll retries pending candidates using the usual checks.
+
+Name-only matches, user-owned listings without opt-in, and manually edited imports
+wait in **Admin → Pending imports**. Enabling the switch does not clear a manual
+edit: review the next release with **Update listing** to resume. Following releases
+preserves existing descriptions; opting in a modder-owned listing does not enable
+generated overviews for it. The **Find listing** field filters the alphabetical picker by any part
 of a name, version or `#ID`, without changing an existing selection. Inspect the
 post date, source, description, and download links, then:
 
@@ -269,9 +279,9 @@ Known video attachments are not imported as screenshots.
 Accepted historical names also prevent renamed mods from being imported as duplicates;
 ambiguous identity and intervening manual edits still require review.
 
-Import acceptance does not award a release approval check. Manual updates preserve
-the target's ownership; listings owned by a different account continue to require
-manual resolution. Model refusals/invalid extraction appear in
+Import acceptance does not award a release approval check. Manual and automatic
+updates preserve the target's ownership; another account's listing requires manual
+resolution unless an admin has opted it into thread updates. Model refusals/invalid extraction appear in
 **Import errors**, where Retry queues another attempt on the next run. API or
 network failures leave unprocessed work durable for a later run. Image failures
 keep the listing and its previous/default image; use Edit to retry the image.
@@ -466,7 +476,7 @@ multipart downloads, thumbnail crops, remote-image validation, migrations,
 account wizard validation/cancellation, and deletion cascades. Tests never write
 to the running site's data.
 
-Schema version 9 is recorded in `PRAGMA user_version`. A transaction migrates
+Schema version 10 is recorded in `PRAGMA user_version`. A transaction migrates
 older versions automatically, preserving listings, votes, and release checks.
 Version 4 removes the retired Hot metric's activity table and index.
 Version 5 preserves existing IDs and prevents reuse of subsequently deleted
@@ -480,6 +490,8 @@ Version 8 adds retained source image records. Existing covers are preserved; run
 `ingest images` to populate galleries for previously published announcements.
 Version 9 adds redirects for merged listing IDs. Only GET/HEAD requests redirect;
 stale writes cannot modify the surviving listing.
+Version 10 adds per-listing thread-update overrides. Existing listings keep their
+previous behavior until an admin changes the setting.
 Existing accounts keep their username display until they enable Anonymous.
 Existing single downloads become one-item arrays with a filename inferred from the URL.
 Existing local screenshots get centered thumbnails on startup; authors can

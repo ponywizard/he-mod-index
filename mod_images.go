@@ -178,7 +178,11 @@ func (a *app) retainCandidateImage(ctx context.Context, c importCandidate, modID
 	if err = tx.QueryRow("SELECT role FROM users WHERE id=?", owner).Scan(&role); err != nil {
 		return err
 	}
-	if role != "admin" || actor == nil && current.UserID != owner {
+	allowed, err := threadUpdatesAllowed(tx, current, owner)
+	if err != nil {
+		return err
+	}
+	if role != "admin" || actor == nil && !allowed {
 		return problem(403, "Importer owner no longer authorized.")
 	}
 	if fingerprint(current) != fingerprint(old) {

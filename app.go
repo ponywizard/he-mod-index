@@ -124,6 +124,8 @@ func (a *app) routes() http.Handler {
 	m.HandleFunc("POST /api/mods/{id}/image/crop", a.handle(a.recropImage))
 	m.HandleFunc("POST /api/images/preview", a.handle(a.previewImage))
 	m.HandleFunc("GET /api/admin/users", a.handle(a.listUsers))
+	m.HandleFunc("GET /api/admin/mods/{id}/thread-updates", a.handle(a.getThreadUpdates))
+	m.HandleFunc("PUT /api/admin/mods/{id}/thread-updates", a.handle(a.updateThreadUpdates))
 	m.HandleFunc("GET /api/admin/import-errors", a.handle(a.listImportErrors))
 	m.HandleFunc("POST /api/admin/import-errors/{id}", a.handle(a.retryImportPost))
 	m.HandleFunc("GET /api/admin/imports", a.handle(a.listCandidates))

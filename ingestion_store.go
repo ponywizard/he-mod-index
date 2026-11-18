@@ -420,8 +420,15 @@ func matchImport(tx *sql.Tx, c importCandidate, owner int64) (int64, error) {
 		return 0, problem(409, "Multiple existing listings may match.")
 	}
 	m := possible[0]
-	if m.UserID != owner || m.SourceURL == "" {
-		return 0, problem(409, "Existing listing requires an explicit merge.")
+	if m.SourceURL == "" {
+		return 0, problem(409, fmt.Sprintf("Listing #%d has no accepted current source. Use Update listing to establish it.", m.ID))
+	}
+	allowed, err := threadUpdatesAllowed(tx, m, owner)
+	if err != nil {
+		return 0, err
+	}
+	if !allowed {
+		return 0, problem(409, fmt.Sprintf("Automatic updates are off for %s (#%d). Enable Follow thread updates on its page, or use Update listing.", m.Name, m.ID))
 	}
 	matched := previousMatches[m.ID]
 	if normalizedName(m.Name) == normalizedName(c.Entry.Name) {
@@ -501,7 +508,7 @@ func (a *app) publishCandidate(ctx context.Context, id, owner int64, actor *iden
 		if priorTime >= c.Source.Time {
 			return 0, problem(409, "An equal or newer release post is already indexed. Use Add to history to keep this post without replacing the current release.")
 		}
-		if target == nil && (old.UserID != owner || priorFingerprint != fingerprint(old)) {
+		if target == nil && priorFingerprint != fingerprint(old) {
 			return 0, problem(409, "Listing was edited manually; review this update.")
 		}
 		if in.Version == "Unversioned" && sameReleaseDownloads(old.Downloads, in.Downloads) {

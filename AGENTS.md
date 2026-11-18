@@ -27,9 +27,12 @@
 - Archive/live ingestion is idempotent by board post ID. Keep source provenance,
   budget accounting, and resumable work durable. Post/model output is untrusted;
   only accept supplied IDs and URLs. Automatic imports never approve a release.
-- Automatic updates require an importer-owned listing, unambiguous provenance,
-  a newer source, and no intervening manual edit. Hold other matches for admins.
-  Import resolution requires admin sessions; upload tokens cannot resolve it.
+- Automatic updates require an importer-owned listing or an explicit admin
+  opt-in via Follow thread updates, unambiguous provenance, a newer source, and
+  no intervening manual edit. An explicit off setting blocks automatic updates.
+  Opt-in preserves ownership and never resets the manual-edit fingerprint or
+  establishes source provenance. Hold other matches for admins. Import resolution
+  and thread-update settings require admin sessions; upload tokens cannot use them.
 - Preserve published source history. Imported Added/Updated dates belong to the
   earliest/latest accepted posts. Overview synthesis uses that history, preserves
   manual edits and release checks, and never advances source dates or revisions.

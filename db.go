@@ -37,7 +37,7 @@ func openDB(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 func migrateDB(db *sql.DB) (err error) {
 	// Table rebuilds require foreign_keys to be disabled before the transaction.
@@ -166,6 +166,12 @@ func migrateDB(db *sql.DB) (err error) {
 		if _, err = tx.Exec(schemaV9); err != nil {
 			return err
 		}
+		version = 9
+	}
+	if version == 9 {
+		if _, err = tx.Exec(schemaV10); err != nil {
+			return err
+		}
 	}
 	rows, err := tx.Query("PRAGMA foreign_key_check")
 	if err != nil {
@@ -182,6 +188,16 @@ func migrateDB(db *sql.DB) (err error) {
 	}
 	return tx.Commit()
 }
+
+// An admin may opt a modder-owned listing into thread updates, or pause any
+// listing. Missing overrides retain the original importer-owned-only default.
+const schemaV10 = `
+CREATE TABLE IF NOT EXISTS mod_thread_updates (
+ mod_id INTEGER PRIMARY KEY REFERENCES mods(id) ON DELETE CASCADE,
+ enabled INTEGER NOT NULL CHECK(enabled IN (0,1))
+);
+PRAGMA user_version=10;
+`
 
 // Retired listing IDs redirect to a surviving listing after an operator merge.
 const schemaV9 = `

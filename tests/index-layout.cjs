@@ -56,6 +56,8 @@ let catalog = mods;
 let fixtureUser = {id: 1, username: 'owner', role: 'user'};
 let pendingImport = true;
 let publishedImport = null;
+let updateSetting = {enabled: false, has_source: true, paused: false, reason: 'Thread updates require manual review.', etag: 'initial-setting'};
+let savedUpdateSetting = null;
 const importFixture = {id: 10, reason: 'Confirm the matching listing.', source: {id: 2, author: "Anonymous", image: "https://example.org/source.png", time: timestamp - 1000, url: 'https://desuarchive.org/mlp/thread/1/#2', text: '<img src=x onerror="window.unsafe=true"> Source post'}, entry: {name: 'Imported mod', version: '2.0', short_description: 'A discovered mod.', description: 'Install the package.', downloads: [{filename: 'mod.pck', url: 'https://example.org/mod.pck'}]}};
 async function evaluate(expression) {
   const result = await call('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true}, session);
@@ -87,6 +89,13 @@ async function screenshot(name) {
     else if (url.pathname === '/api/site') body = Buffer.from(JSON.stringify({current_thread: 'https://boards.4chan.org/mlp/thread/43715264'}));
     else if (url.pathname === '/api/admin/users') body = Buffer.from(JSON.stringify([{...fixtureUser, created_at: timestamp, mods: mods.length, votes: 0}]));
     else if (url.pathname === '/api/admin/import-errors') body = Buffer.from('[]');
+    else if (/^\/api\/admin\/mods\/\d+\/thread-updates$/.test(url.pathname)) {
+      if (request.request.method === 'PUT') {
+        savedUpdateSetting = JSON.parse(request.request.postData);
+        updateSetting = {...updateSetting, enabled: savedUpdateSetting.enabled, etag: 'saved-setting', reason: 'Clear newer releases are accepted on the next poll.'};
+      }
+      body = Buffer.from(JSON.stringify(updateSetting));
+    }
     else if (url.pathname === '/api/admin/imports') body = Buffer.from(JSON.stringify(pendingImport ? [importFixture] : []));
     else if (url.pathname === '/api/admin/imports/10') {publishedImport = JSON.parse(request.request.postData); pendingImport = false; body = Buffer.from('{"id":1,"warning":""}');}
     else if (/^\/api\/mods\/\d+\/images$/.test(url.pathname)) body = Buffer.from(JSON.stringify(url.pathname.includes('/1/') ? gallery : url.pathname.includes('/3/') ? [gallery[0]] : []));
@@ -254,6 +263,20 @@ async function screenshot(name) {
     assert.deepEqual(publishedImport, {action, target_id: target, revision: target ? 1 : 0});
     assert.equal(await evaluate("document.querySelector('#message').className"), 'success');
   }
+  // Only admins can see the per-listing thread-update control. It saves its own
+  // permission without posting the listing's title, ownership, or release data.
+  await evaluate("navigate('/mod/1')");
+  await until("Boolean(document.querySelector('#thread-updates-form'))");
+  assert.equal(await evaluate("document.querySelector('#thread-updates-form [name=enabled]').checked"), false);
+  await evaluate("document.querySelector('#thread-updates-form [name=enabled]').checked = true; document.querySelector('#thread-updates-form button').click()");
+  await until("document.querySelector('[data-thread-updates] [role=status]').textContent.includes('next poll')");
+  assert.deepEqual(savedUpdateSetting, {enabled: true, etag: 'initial-setting'});
+  assert.equal(await evaluate("document.querySelector('#thread-updates-form [name=enabled]').checked"), true);
+  assert(await evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), 'Thread update control overflows on mobile');
+  fixtureUser = {...fixtureUser, role: 'user'};
+  await evaluate("refreshSession().then(() => render())");
+  await until("Boolean(document.querySelector('.detail-header')) && !document.querySelector('[data-thread-updates]')");
+  fixtureUser = {...fixtureUser, role: 'admin'};
   // Numbered hrefs preserve full-catalog sorting/filtering and the current scroll offset.
   catalog = [...mods, ...Array.from({length: 19}, (_, n) => ({...mods[2], id: n + 5, name: `Paged mod ${String(n + 5).padStart(2, '0')}`, updated_at: timestamp + n + 5, description: 'Another catalog entry.'}))];
   await call('Emulation.setDeviceMetricsOverride', {width: 1200, height: 850, deviceScaleFactor: 1, mobile: false}, session);

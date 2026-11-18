@@ -260,11 +260,25 @@ function wireGallery(images, name) {
   };
 }
 async function detailPage(id, current) {
-  const [m, releases, images] = await Promise.all([api(`/api/mods/${id}`), api(`/api/mods/${id}/history`), api(`/api/mods/${id}/images`)]); if (current !== routeVersion) return;
+  const [m, releases, images, updates] = await Promise.all([api(`/api/mods/${id}`), api(`/api/mods/${id}/history`), api(`/api/mods/${id}/images`), session.user?.role === 'admin' ? api(`/api/admin/mods/${id}/thread-updates`) : null]); if (current !== routeVersion) return;
   const u = session.user, owner = u && (m.user_id === u.id || u.role === 'admin');
   document.title = `${m.name} — Home: Equestria mods`;
   view.innerHTML = `<section class="panel"><div class="detail-header"><h2>${esc(m.name)}${badge(m)}</h2><span>${esc(m.version)}</span></div><p class="detail-meta">${esc(m.author)} · Added ${date(m.created_at)} · Updated ${date(m.updated_at)}${m.game_version ? ` · Home: Equestria ${esc(m.game_version)}` : ''}</p><p>${esc(m.short_description)}</p><div class="actions">${m.repository_url ? link(m.repository_url, 'Repository') : ''}${m.source_url ? link(m.source_url, 'Source post') : ''}${votes(m)}${owner ? `<a href="/mod/${m.id}/edit" data-nav>Edit</a><button class="link-button danger" data-delete-mod="${m.id}">Remove</button>` : ''}</div><h3 class="section-title">Downloads</h3><ul class="downloads">${m.downloads.map(d => `<li>${link(d.url, d.filename)}</li>`).join('')}</ul>${m.description ? `<div class="description">${esc(m.description)}</div>` : ''}${releaseHistory(releases)}${m.approval !== 'none' ? `<p class="muted">${m.approval === 'current' ? 'Approved' : 'Earlier release approved'} by ${esc(m.approved_by)} · ${date(m.approved_at)}</p>` : ''}${u?.role === 'reviewer' ? `<div class="actions"><button data-approve="true" data-revision="${m.revision}" data-id="${m.id}">Approve this release</button>${m.approval !== 'none' ? `<button data-approve="false" data-revision="${m.revision}" data-id="${m.id}">Clear check</button>` : ''}</div>` : ''}${modGallery(images, m.name)}</section>`;
   wireGallery(images, m.name);
+  if (updates) {
+    view.querySelector('.detail-meta').insertAdjacentHTML('afterend', '<div data-thread-updates></div>');
+    wireThreadUpdates(id, updates);
+  }
+}
+function wireThreadUpdates(id, state) {
+  const panel = view.querySelector('[data-thread-updates]');
+  panel.innerHTML = `<form id="thread-updates-form"><label class="checkline"><input type="checkbox" name="enabled"${state.enabled ? ' checked' : ''}${!state.has_source && !state.enabled ? ' disabled' : ''}>Follow thread updates</label><p class="muted" role="status">${esc(state.reason)}</p><button type="submit">Save setting</button></form>`;
+  wireForm('#thread-updates-form', async form => {
+    const next = await api(`/api/admin/mods/${id}/thread-updates`, {method: 'PUT', body: {enabled: form.elements.enabled.checked, etag: state.etag}});
+    if (!panel.isConnected) return;
+    wireThreadUpdates(id, next);
+    notice('Thread update setting saved.', true);
+  });
 }
 async function accountPage(current) {
   if (!needUser()) return;
