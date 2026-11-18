@@ -55,3 +55,7 @@
   operator permits eventual automatic editorial improvements, but this pilot
   only produces reports. Audits never grant human release approval. A future
   Agent Reviewed badge must be separate and bound to exact downloaded bytes.
+- Explicitly requested model comparisons may review the same artifact once per
+  comparison model, using the frozen original prompt and listing/history context.
+  Keep their reports/attempt markers separate from the baseline, but use the same
+  usage ledger and cumulative cap. A comparison never updates live listing copy.

@@ -17,13 +17,23 @@ import (
 )
 
 type modelClient struct {
-	app        *app
-	key, model string
-	budget     int64 // USD millionths; cumulative across runs in this database.
-	client     *http.Client
-	endpoint   string
-	reasoning  string
-	maxOutput  int
+	app         *app
+	key, model  string
+	budget      int64 // USD millionths; cumulative across runs in this database.
+	client      *http.Client
+	endpoint    string
+	reasoning   string
+	maxOutput   int
+	auditPrompt string // Frozen instructions for an explicitly requested comparison.
+	lastUsage   *modelUsage
+}
+
+type modelUsage struct {
+	ID             int64  `json:"id"`
+	InputTokens    int64  `json:"input_tokens"`
+	OutputTokens   int64  `json:"output_tokens"`
+	ReservedMicros int64  `json:"reserved_micros"`
+	ActualMicros   *int64 `json:"actual_micros,omitempty"`
 }
 type modelDataError struct{ message string }
 
@@ -35,6 +45,7 @@ var modelPrices = map[string]modelPrice{
 	// Standard, short-context pricing verified 2026-11-18. Audit requests remain
 	// below 180 KB, well below Astra's 272K-token long-context threshold.
 	"gpt-6.2-astra": {8, 40},
+	"gpt-6.2-sol":   {2, 10},
 	"gpt-6.1-terra": {1, 5},
 	"gpt-6-luna":    {0.10, 0.50},
 	"gpt-5-nano":    {0.05, 0.40},
@@ -83,6 +94,7 @@ func schemaObject(properties map[string]any) map[string]any {
 func schemaString() map[string]any         { return map[string]any{"type": "string"} }
 func schemaArray(items any) map[string]any { return map[string]any{"type": "array", "items": items} }
 func (c *modelClient) call(ctx context.Context, stage, instructions string, input any, schema any, out any) error {
+	c.lastUsage = nil
 	payload, err := json.Marshal(input)
 	if err != nil {
 		return err
@@ -95,7 +107,7 @@ func (c *modelClient) call(ctx context.Context, stage, instructions string, inpu
 		reasoning = "low"
 	}
 	reqBody := map[string]any{"model": c.model, "store": false, "service_tier": "default", "instructions": instructions, "input": string(payload), "max_output_tokens": maxOutput, "reasoning": map[string]string{"effort": reasoning}, "text": map[string]any{"format": map[string]any{"type": "json_schema", "name": stage, "strict": true, "schema": schema}}}
-	if c.model == "gpt-6.2-astra" {
+	if c.model == "gpt-6.2-astra" || c.model == "gpt-6.2-sol" {
 		// Each package is reviewed once. Explicit mode without breakpoints turns
 		// off cache writes (which otherwise cost 1.25x input on this model).
 		reqBody["prompt_cache_options"] = map[string]string{"mode": "explicit"}
@@ -134,6 +146,7 @@ func (c *modelClient) call(ctx context.Context, stage, instructions string, inpu
 	if err = tx.Commit(); err != nil {
 		return err
 	}
+	c.lastUsage = &modelUsage{ID: id, ReservedMicros: reserve}
 	req, err := http.NewRequestWithContext(ctx, "POST", c.endpoint, bytes.NewReader(b))
 	if err != nil {
 		return err
@@ -173,6 +186,8 @@ func (c *modelClient) call(ctx context.Context, stage, instructions string, inpu
 		if _, err = c.app.db.Exec("UPDATE ingest_usage SET actual_micros=? WHERE id=?", cost, id); err != nil {
 			return err
 		}
+		c.lastUsage.InputTokens, c.lastUsage.OutputTokens = result.Usage.Input, result.Usage.Output
+		c.lastUsage.ActualMicros = &cost
 	}
 	if result.Status != "completed" {
 		return &modelDataError{"model response incomplete"}

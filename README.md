@@ -497,6 +497,25 @@ multiline quotes, line numbers and source hashes still have to match. A private
 offline report does not update the live audit cache, and cannot assert that its
 metadata proposal still matches the current listing.
 
+An explicitly requested Sol comparison can replay the original Astra pilot:
+
+```sh
+DATA_DIR=/path/to/existing/data ./he-mod-index audit compare \
+  --inspection /tmp/mod.inspection.json --report /tmp/astra.report.json \
+  --model gpt-6.2-sol --budget 20 --out /tmp/sol.report.json
+```
+
+This uses the original frozen pilot prompt, source inventory, accepted history,
+operator edits, high reasoning and 12,000-token output limit. Only the model
+changes. Both outputs use the corrected citation validator; Astra's answers are
+not included in Sol's input. Baselines must identify the same artifact and
+context. Results go under `DATA_DIR/audits/comparisons/gpt-6.2-sol/<sha256>/`;
+retries reuse completed results, and changed comparison inputs are refused.
+The same database accounts for every call. Reports include usage tokens and
+actual/reserved cost, while a duplicate report retains the original usage ID.
+The comparison bundle runner permits at most $1 more within the existing $20
+cap and retains that ceiling on restart. It never applies proposed metadata.
+
 Encrypted directories, files or scripts produce `red_flag` immediately, without
 a model call. This indicates blocked inspection, not proven malware. Opaque
 executables, compiled scripts, binary Godot resources, excessive source and

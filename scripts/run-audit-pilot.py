@@ -64,6 +64,9 @@ def main():
     options = parser.parse_args()
     bundle = Path(__file__).resolve().parent
     manifest = json.loads(read_regular(bundle / "manifest.json", 65536))
+    comparison_model = manifest.get("comparison_model")
+    if comparison_model not in (None, "gpt-6.2-sol"):
+        raise RuntimeError("Unsupported comparison model")
     blobs = {}
     for name, expected in manifest["files"].items():
         if Path(name).name != name or name in (".", ".."):
@@ -78,6 +81,10 @@ def main():
             raise RuntimeError("Artifact manifest mismatch")
         if case.get("context") and case["context"] not in blobs:
             raise RuntimeError("Missing fixture context")
+        if comparison_model:
+            baseline = json.loads(blobs[case["baseline"]])
+            if baseline["sha256"] != inspection["sha256"] or baseline["model"] != "gpt-6.2-astra":
+                raise RuntimeError("Comparison baseline mismatch")
     if options.check_only:
         print(json.dumps({"bundle_verified": True, "cases": len(manifest["cases"]), "model_calls": 0}))
         return
@@ -98,7 +105,7 @@ def main():
     base = Path("/srv/he-mod-index/audit-pilot")
     base.mkdir(mode=0o750, exist_ok=True)
     os.chown(base, 0, service.pw_gid)
-    work = base / "research-20261118"
+    work = base / ("sol-comparison-20261118" if comparison_model else "research-20261118")
     work.mkdir(mode=0o750, exist_ok=True)
     os.chown(work, 0, service.pw_gid)
     outputs = work / "results"
@@ -121,7 +128,8 @@ def main():
     if budget_path.exists():
         budget = json.loads(read_regular(budget_path, 4096))
     else:
-        budget = {"starting_micros": before, "ceiling_micros": min(20_000_000, before + 6_000_000)}
+        allowance = 1_000_000 if comparison_model else 6_000_000
+        budget = {"starting_micros": before, "ceiling_micros": min(20_000_000, before + allowance)}
         write_atomic(budget_path, json.dumps(budget).encode(), 0, 0, 0o600)
     if not 0 < budget["ceiling_micros"] <= 20_000_000:
         raise RuntimeError("Invalid persistent pilot budget")
@@ -131,13 +139,16 @@ def main():
     export.mkdir(mode=0o700, exist_ok=True)
     os.chown(export, operator.pw_uid, operator.pw_gid)
     outcomes = []
+    usage_records = {}
     for index, case in enumerate(manifest["cases"]):
         filename = f"{index:02d}-report.json"
         output = outputs / filename
         output.unlink(missing_ok=True)
-        args = ["review", "--inspection", str(work / case["inspection"]),
+        args = ["compare" if comparison_model else "review", "--inspection", str(work / case["inspection"]),
                 "--out", str(output), "--budget", cap]
-        if case.get("mod_id"):
+        if comparison_model:
+            args += ["--model", comparison_model, "--report", str(work / case["baseline"])]
+        elif case.get("mod_id"):
             args += ["--mod", str(case["mod_id"]), "--url", case["url"]]
         else:
             args += ["--context", str(work / case["context"])]
@@ -152,16 +163,25 @@ def main():
             # Never export an earlier run's output for a different artifact.
             if report["sha256"] != case["artifact_sha256"]:
                 raise RuntimeError("Report identity mismatch")
+            if report["model"] != (comparison_model or "gpt-6.2-astra"):
+                raise RuntimeError("Report model mismatch")
             write_atomic(export / filename, data, operator.pw_uid, operator.pw_gid, 0o600)
-            diagnostic = Path(env["DATA_DIR"]) / "audits" / case["artifact_sha256"] / "model-output.json"
+            audit_cache = Path(env["DATA_DIR"]) / "audits"
+            if comparison_model:
+                audit_cache = audit_cache / "comparisons" / comparison_model
+            diagnostic = audit_cache / case["artifact_sha256"] / "model-output.json"
             if diagnostic.exists() and report.get("error"):
                 write_atomic(export / f"{index:02d}-model-output.json", read_regular(diagnostic, 2 << 20),
                              operator.pw_uid, operator.pw_gid, 0o600)
+            if report.get("usage"):
+                usage_records[report["usage"]["id"]] = report["usage"]
         checks = []
         if report and case.get("expected_state"):
             checks.append(report["state"] == case["expected_state"])
         if case.get("forbidden_state"):
-            checks.append((report or {}).get("state") != case["forbidden_state"])
+            checks.append(bool(report) and report["state"] != case["forbidden_state"])
+        if "expected_cached" in case:
+            checks.append(bool(report) and report["cached"] == case["expected_cached"])
         model = (report or {}).get("result") or {}
         metadata = model.get("metadata") or {}
         if case.get("expected_name"):
@@ -186,6 +206,12 @@ def main():
                "application_cap_usd": 20,
                "configuration_preserved": read_regular(Path("/etc/he-mod-index.env"), 1 << 20) == raw_env,
                "listings_changed": False, "public_badges_changed": False}
+    if comparison_model:
+        summary.update({"model": comparison_model, "baseline_model": "gpt-6.2-astra",
+                        "frozen_context": True, "unique_model_requests": len(usage_records),
+                        "comparison_spent_or_reserved_usd": sum(u.get("actual_micros", u["reserved_micros"]) for u in usage_records.values()) / 1e6,
+                        "comparison_input_tokens": sum(u["input_tokens"] for u in usage_records.values()),
+                        "comparison_output_tokens": sum(u["output_tokens"] for u in usage_records.values())})
     write_atomic(export / "summary.json", json.dumps(summary, indent=2).encode(), operator.pw_uid, operator.pw_gid, 0o600)
     print(json.dumps(summary, indent=2), flush=True)
 

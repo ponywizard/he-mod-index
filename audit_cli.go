@@ -94,6 +94,37 @@ func auditWriteFile(path string, b []byte) error {
 	return d.Sync()
 }
 
+func auditSeparateOutput(output string, inputs ...string) error {
+	outPath, err := filepath.Abs(output)
+	if err != nil {
+		return err
+	}
+	for _, input := range inputs {
+		if input == "" {
+			continue
+		}
+		inPath, err := filepath.Abs(input)
+		if err != nil {
+			return err
+		}
+		if inPath == outPath {
+			return errors.New("audit output must not replace an input")
+		}
+		if outInfo, err := os.Stat(outPath); err == nil {
+			inInfo, err := os.Stat(inPath)
+			if err != nil {
+				return err
+			}
+			if os.SameFile(inInfo, outInfo) {
+				return errors.New("audit output must not replace an input")
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
 func fetchAuditPackage(ctx context.Context, raw string) ([]byte, error) {
 	u, err := imageURL(raw) // Shared public-IP checks, pinned DNS and redirects.
 	if err != nil {
@@ -226,7 +257,7 @@ func openAuditLedger(dir string) (*sql.DB, error) {
 
 func runAudit(ctx context.Context, args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: audit fetch|inspect|review|revalidate|status [flags]; see README")
+		return errors.New("usage: audit fetch|inspect|review|compare|revalidate|status [flags]; see README")
 	}
 	fs := flag.NewFlagSet("audit "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -234,7 +265,8 @@ func runAudit(ctx context.Context, args []string, out io.Writer) error {
 	raw := fs.String("url", "", "public download URL")
 	output := fs.String("out", "", "output file")
 	inspection := fs.String("inspection", "", "saved isolated inspection JSON")
-	reportFile := fs.String("report", "", "saved report to revalidate offline")
+	reportFile := fs.String("report", "", "saved report to revalidate or use as a comparison baseline")
+	comparisonModel := fs.String("model", "gpt-6.2-sol", "compare: alternate model (gpt-6.2-sol)")
 	modelOutput := fs.String("model-output", "", "saved model output if the report failed validation")
 	modID := fs.Int64("mod", 0, "existing listing ID (current edits/history read at review time)")
 	contextFile := fs.String("context", "", "synthetic fixture context JSON instead of a listing")
@@ -249,39 +281,26 @@ func runAudit(ctx context.Context, args []string, out io.Writer) error {
 	if fs.NArg() != 0 {
 		return errors.New("unexpected arguments")
 	}
+	modelFlag := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" {
+			modelFlag = true
+		}
+	})
+	if modelFlag && args[0] != "compare" {
+		return errors.New("--model requires audit compare; normal reviews use Astra")
+	}
 	switch args[0] {
+	case "compare":
+		return runAuditComparison(ctx, auditComparisonOptions{Inspection: *inspection, Baseline: *reportFile, Output: *output, Model: *comparisonModel, EnvFile: *envFile, Budget: *budget}, out)
 	case "revalidate":
 		if *inspection == "" || *reportFile == "" || *output == "" {
 			return errors.New("revalidate requires --inspection, --report and --out")
 		}
 		// Explicit separate output preserves the original evidence trail, even
 		// if an operator accidentally supplies the same file under another path.
-		for _, input := range []string{*inspection, *reportFile, *modelOutput} {
-			if input == "" {
-				continue
-			}
-			inPath, err := filepath.Abs(input)
-			if err != nil {
-				return err
-			}
-			outPath, err := filepath.Abs(*output)
-			if err != nil {
-				return err
-			}
-			if inPath == outPath {
-				return errors.New("revalidation output must not replace an input")
-			}
-			if outInfo, err := os.Stat(outPath); err == nil {
-				inInfo, err := os.Stat(inPath)
-				if err != nil {
-					return err
-				}
-				if os.SameFile(inInfo, outInfo) {
-					return errors.New("revalidation output must not replace an input")
-				}
-			} else if !os.IsNotExist(err) {
-				return err
-			}
+		if err := auditSeparateOutput(*output, *inspection, *reportFile, *modelOutput); err != nil {
+			return err
 		}
 		var in auditInspection
 		if err := auditReadJSON(*inspection, &in); err != nil {

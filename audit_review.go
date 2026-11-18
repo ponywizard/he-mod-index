@@ -72,22 +72,26 @@ type auditModelResult struct {
 	Metadata   auditMetadata   `json:"metadata"`
 }
 type auditReport struct {
-	Policy            string            `json:"policy"`
-	SHA256            string            `json:"sha256"`
-	Model             string            `json:"model"`
-	Reasoning         string            `json:"reasoning"`
-	State             string            `json:"state"`
-	Scope             string            `json:"scope"`
-	CreatedAt         int64             `json:"created_at"`
-	ContextSHA256     string            `json:"context_sha256"`
-	Context           auditContext      `json:"context"`
-	MetadataCurrent   bool              `json:"metadata_current"`
-	Cached            bool              `json:"cached"`
-	Issues            []auditIssue      `json:"issues"`
-	Result            *auditModelResult `json:"result,omitempty"`
-	Error             string            `json:"error,omitempty"`
-	ValidationVersion string            `json:"validation_version,omitempty"`
-	RevalidatedAt     int64             `json:"revalidated_at,omitempty"`
+	Policy               string            `json:"policy"`
+	SHA256               string            `json:"sha256"`
+	Model                string            `json:"model"`
+	Reasoning            string            `json:"reasoning"`
+	State                string            `json:"state"`
+	Scope                string            `json:"scope"`
+	CreatedAt            int64             `json:"created_at"`
+	ContextSHA256        string            `json:"context_sha256"`
+	Context              auditContext      `json:"context"`
+	MetadataCurrent      bool              `json:"metadata_current"`
+	Cached               bool              `json:"cached"`
+	Issues               []auditIssue      `json:"issues"`
+	Result               *auditModelResult `json:"result,omitempty"`
+	Error                string            `json:"error,omitempty"`
+	ValidationVersion    string            `json:"validation_version,omitempty"`
+	RevalidatedAt        int64             `json:"revalidated_at,omitempty"`
+	InputSHA256          string            `json:"input_sha256,omitempty"`
+	Usage                *modelUsage       `json:"usage,omitempty"`
+	BaselineModel        string            `json:"baseline_model,omitempty"`
+	BaselineReportSHA256 string            `json:"baseline_report_sha256,omitempty"`
 }
 
 const auditValidationVersion = "source-lines-v2"
@@ -269,18 +273,49 @@ func revalidateAudit(in auditInspection, saved auditReport, result *auditModelRe
 // interruption after dispatch must not cause another billable request on retry.
 // Exact artifact hashes are independent of URL, filename and mod ID. Metadata
 // reuse is separately qualified by the current listing/history fingerprint.
+func auditReviewInput(in auditInspection, c auditContext, instructions string) (map[string]any, string, error) {
+	input := map[string]any{"inspection": in, "current_context": c, "metadata_evidence_texts": auditEvidenceTexts(auditInspection{}, c)}
+	frozen, err := json.Marshal(map[string]any{"instructions": instructions, "input": input, "schema": auditSchema(), "reasoning": "high", "max_output_tokens": 12000})
+	if err != nil {
+		return nil, "", err
+	}
+	return input, auditHash(frozen), nil
+}
+
 func reviewAudit(ctx context.Context, client *modelClient, cache string, in auditInspection, c auditContext) (auditReport, error) {
 	r := auditReport{Policy: auditPolicy, SHA256: in.SHA256, Model: "gpt-6.2-astra", Reasoning: "high", State: "incomplete", Scope: "Static source review only. Media assets hashed, not decoded; no runtime testing or safety guarantee.", CreatedAt: time.Now().Unix(), ContextSHA256: auditContextHash(c), Context: c, MetadataCurrent: true, Issues: in.Issues, ValidationVersion: auditValidationVersion}
+	instructions := auditInstructions
+	if client != nil {
+		client.lastUsage = nil
+		if client.model != "gpt-6.2-astra" && client.model != "gpt-6.2-sol" {
+			return r, errors.New("unsupported audit model")
+		}
+		r.Model = client.model
+		if client.auditPrompt != "" {
+			instructions = client.auditPrompt
+		}
+	}
+	input, inputHash, err := auditReviewInput(in, c, instructions)
+	if err != nil {
+		return r, err
+	}
+	r.InputSHA256 = inputHash
 	if err := validateAuditInspection(in); err != nil {
 		return r, err
 	}
 	dir := filepath.Join(cache, in.SHA256)
 	path := filepath.Join(dir, "report.json")
 	var saved auditReport
-	err := auditReadJSON(path, &saved)
+	err = auditReadJSON(path, &saved)
 	if err == nil {
 		if saved.SHA256 != in.SHA256 {
 			return r, errors.New("cached artifact mismatch")
+		}
+		if saved.Model != r.Model {
+			return r, errors.New("cached review belongs to another model")
+		}
+		if client != nil && client.auditPrompt != "" && saved.InputSHA256 != r.InputSHA256 {
+			return r, errors.New("comparison inputs changed; refusing to reuse or repeat the paid review")
 		}
 		saved.Cached = true
 		saved.MetadataCurrent = saved.ContextSHA256 == r.ContextSHA256
@@ -310,6 +345,9 @@ func reviewAudit(ctx context.Context, client *modelClient, cache string, in audi
 		return r, err
 	}
 	finish := func(err error) (auditReport, error) {
+		if client != nil {
+			r.Usage = client.lastUsage
+		}
 		if err != nil {
 			r.Error = err.Error()
 			r.State = "incomplete"
@@ -337,9 +375,8 @@ func reviewAudit(ctx context.Context, client *modelClient, cache string, in audi
 	}
 	// Evidence texts for metadata are separate; code is sent exactly once in the
 	// inventory. Both remain untrusted data in the input, never instructions.
-	evidence := auditEvidenceTexts(auditInspection{}, c)
 	var result auditModelResult
-	if err = client.call(ctx, "audit_source", auditInstructions, map[string]any{"inspection": in, "current_context": c, "metadata_evidence_texts": evidence}, auditSchema(), &result); err != nil {
+	if err = client.call(ctx, "audit_source", instructions, input, auditSchema(), &result); err != nil {
 		return finish(err)
 	}
 	// Retain the untrusted output for diagnosis if evidence validation fails.
